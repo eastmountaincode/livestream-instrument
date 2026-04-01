@@ -12,6 +12,7 @@
  */
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected';
+export type PeerRole = 'leader' | 'follower' | 'none';
 export type WebRTCCallback = () => void;
 export type MessageCallback = (msg: Record<string, unknown>) => void;
 
@@ -19,10 +20,14 @@ class WebRTCService {
   private pc: RTCPeerConnection | null = null;
   private dataChannel: RTCDataChannel | null = null;
   private state: ConnectionState = 'disconnected';
+  private role: PeerRole = 'none';
+  private clockInterval: ReturnType<typeof setInterval> | null = null;
   private listeners: WebRTCCallback[] = [];
   private messageListeners: MessageCallback[] = [];
 
   getState() { return this.state; }
+  getRole() { return this.role; }
+  setRole(role: PeerRole) { this.role = role; this.notifyListeners(); }
 
   onChange(cb: WebRTCCallback) {
     this.listeners.push(cb);
@@ -95,9 +100,26 @@ class WebRTCService {
     this.sendMessage({ type: 'noteOff', note });
   }
 
+  startLeaderClock(bpm = 120) {
+    this.stopLeaderClock();
+    const intervalMs = 60000 / bpm;
+    this.clockInterval = setInterval(() => {
+      this.sendMessage({ type: 'clock', time: Date.now(), bpm });
+    }, intervalMs);
+  }
+
+  stopLeaderClock() {
+    if (this.clockInterval) {
+      clearInterval(this.clockInterval);
+      this.clockInterval = null;
+    }
+  }
+
   disconnect() {
+    this.stopLeaderClock();
     this.cleanup();
     this.state = 'disconnected';
+    this.role = 'none';
     this.notifyListeners();
   }
 

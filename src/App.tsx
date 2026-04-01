@@ -13,6 +13,7 @@ function App() {
   const [streamConnected, setStreamConnected] = useState(false);
   const [showMidi, setShowMidi] = useState(false);
   const [showWebRTC, setShowWebRTC] = useState(false);
+  const [octaveShift, setOctaveShift] = useState(0);
 
   useEffect(() => {
     midiService.init();
@@ -29,11 +30,11 @@ function App() {
 
       <Visualizer />
 
-      <Controls />
+      <Controls octaveShift={octaveShift} setOctaveShift={setOctaveShift} />
 
-      <Keyboard streamConnected={streamConnected} />
+      <Keyboard streamConnected={streamConnected} octaveShift={octaveShift} setOctaveShift={setOctaveShift} />
 
-      <ChordPad streamConnected={streamConnected} />
+      <ChordPad streamConnected={streamConnected} octaveShift={octaveShift} />
 
       <div className="panels-toggle">
         <button className={showMidi ? 'active' : ''} onClick={() => setShowMidi(!showMidi)}>

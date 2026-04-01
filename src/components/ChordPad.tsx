@@ -41,12 +41,13 @@ const CHORD_GROUPS: { label: string; types: string[] }[] = [
 
 interface Props {
   streamConnected: boolean;
+  octaveShift: number;
 }
 
-export function ChordPad({ streamConnected }: Props) {
+export function ChordPad({ streamConnected, octaveShift }: Props) {
+  const octave = 3 + octaveShift; // Base octave 3 (C3 = MIDI 48) + shift
   const [selectedRoot, setSelectedRoot] = useState(0); // C
   const [selectedType, setSelectedType] = useState('maj');
-  const [octave, setOctave] = useState(3); // C3 = MIDI 48
   const [latched, setLatched] = useState(false);
   const [activeChordNotes, setActiveChordNotes] = useState<number[]>([]);
   const [inversion, setInversion] = useState(0);
@@ -98,13 +99,13 @@ export function ChordPad({ streamConnected }: Props) {
     setActiveChordNotes([]);
   }, []);
 
-  // When root/type/octave/inversion changes and latched, update the playing chord
+  // When root/type/octave/inversion changes and notes are playing, update the chord
   useEffect(() => {
-    if (latched && prevNotes.current.length > 0) {
+    if (prevNotes.current.length > 0) {
       const notes = buildChord(selectedRoot, selectedType, octave, inversion);
       playChord(notes);
     }
-  }, [selectedRoot, selectedType, octave, inversion, latched, buildChord, playChord]);
+  }, [selectedRoot, selectedType, octave, inversion, buildChord, playChord]);
 
   const handleChordTrigger = (root: number, type: string) => {
     setSelectedRoot(root);
@@ -139,11 +140,6 @@ export function ChordPad({ streamConnected }: Props) {
         >
           {latched ? 'LATCH ON' : 'LATCH OFF'}
         </button>
-        <div className="chord-octave">
-          <button onClick={() => setOctave(Math.max(1, octave - 1))}>-</button>
-          <span>Oct {octave}</span>
-          <button onClick={() => setOctave(Math.min(6, octave + 1))}>+</button>
-        </div>
         <div className="chord-inversion">
           <button onClick={() => setInversion(Math.max(0, inversion - 1))}>-</button>
           <span>Inv {inversion}</span>
@@ -197,14 +193,14 @@ export function ChordPad({ streamConnected }: Props) {
       <div className="quick-grid">
         <div className="quick-grid-header">
           <span className="quick-grid-corner">Quick</span>
-          {['maj', 'min', '7', 'maj7', 'min7', 'dim', 'sus4'].map(type => (
+          {['maj', 'min', 'maj7', 'min7', 'min9', 'min11', 'sus4'].map(type => (
             <span key={type} className="quick-col-label">{CHORD_TYPES[type].short || 'M'}</span>
           ))}
         </div>
         {ROOT_NOTES.map(({ name, semitone }) => (
           <div key={semitone} className="quick-grid-row">
             <span className={`quick-row-label ${name.includes('#') ? 'sharp' : ''}`}>{name}</span>
-            {['maj', 'min', '7', 'maj7', 'min7', 'dim', 'sus4'].map(type => (
+            {['maj', 'min', 'maj7', 'min7', 'min9', 'min11', 'sus4'].map(type => (
               <button
                 key={type}
                 className={`quick-btn ${selectedRoot === semitone && selectedType === type && activeChordNotes.length > 0 ? 'active' : ''}`}

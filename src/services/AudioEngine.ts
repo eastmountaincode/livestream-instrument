@@ -62,6 +62,7 @@ export class AudioEngine {
   private activeVoices: Map<number, Voice> = new Map();
 
   private filterQ = DEFAULT_Q;
+  private externalClock = false;
 
   constructor() {
     this.ctx = new AudioContext();
@@ -291,6 +292,14 @@ export class AudioEngine {
 
   getActiveNotes(): number[] {
     return Array.from(this.activeVoices.keys());
+  }
+
+  setExternalClock(enabled: boolean) {
+    this.externalClock = enabled;
+  }
+
+  getExternalClock() {
+    return this.externalClock;
   }
 
   resume() {

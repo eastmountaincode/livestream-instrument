@@ -1,7 +1,12 @@
 import { useState } from 'react';
 import { audioEngine } from '../services/AudioEngine';
 
-export function Controls() {
+interface Props {
+  octaveShift: number;
+  setOctaveShift: React.Dispatch<React.SetStateAction<number>>;
+}
+
+export function Controls({ octaveShift, setOctaveShift }: Props) {
   const [filterQ, setFilterQ] = useState(audioEngine.getFilterQ());
   const [masterVol, setMasterVol] = useState(0.8);
 
@@ -39,6 +44,11 @@ export function Controls() {
         />
         <span className="control-value">{Math.round(masterVol * 100)}%</span>
       </label>
+      <div className="chord-octave">
+        <button onClick={() => setOctaveShift(prev => Math.max(-3, prev - 1))}>-</button>
+        <span>Oct {3 + octaveShift}</span>
+        <button onClick={() => setOctaveShift(prev => Math.min(3, prev + 1))}>+</button>
+      </div>
       <button className="panic-btn" onClick={() => audioEngine.allNotesOff()}>
         All Notes Off
       </button>

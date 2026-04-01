@@ -10,9 +10,9 @@ export type MidiDeviceInfo = { id: string; name: string };
 export type MidiUpdateCallback = () => void;
 
 class MidiService {
-  private access: WebMidi.MIDIAccess | null = null;
-  private selectedInput: WebMidi.MIDIInput | null = null;
-  private selectedOutput: WebMidi.MIDIOutput | null = null;
+  private access: MIDIAccess | null = null;
+  private selectedInput: MIDIInput | null = null;
+  private selectedOutput: MIDIOutput | null = null;
   private listeners: MidiUpdateCallback[] = [];
   private ccCallbacks: ((cc: number, value: number) => void)[] = [];
 
@@ -87,7 +87,8 @@ class MidiService {
     for (const l of this.listeners) l();
   }
 
-  private handleMidiMessage = (e: WebMidi.MIDIMessageEvent) => {
+  private handleMidiMessage = (e: Event) => {
+    if (!(e instanceof MIDIMessageEvent)) return;
     const data = e.data;
     if (!data || data.length === 0) return;
     const status = data[0];

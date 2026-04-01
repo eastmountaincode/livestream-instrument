@@ -27,12 +27,15 @@ function isBlackKey(midi: number): boolean {
 
 interface Props {
   streamConnected: boolean;
+  octaveShift: number;
+  setOctaveShift: React.Dispatch<React.SetStateAction<number>>;
 }
 
-export function Keyboard({ streamConnected }: Props) {
+export function Keyboard({ streamConnected, octaveShift, setOctaveShift }: Props) {
   const [activeNotes, setActiveNotes] = useState<Set<number>>(new Set());
-  const [octaveShift, setOctaveShift] = useState(0);
+  const [latchMode, setLatchMode] = useState(false);
   const heldKeys = useRef<Set<string>>(new Set());
+  const prevOctaveShift = useRef(0);
 
   const triggerNoteOn = useCallback((note: number, velocity = 100) => {
     audioEngine.noteOn(note, velocity);
@@ -49,6 +52,49 @@ export function Keyboard({ streamConnected }: Props) {
       return next;
     });
   }, []);
+
+  // Toggle a note on/off (for latch mode)
+  const toggleNote = useCallback((note: number, velocity = 100) => {
+    setActiveNotes(prev => {
+      if (prev.has(note)) {
+        audioEngine.noteOff(note);
+        webrtcService.sendNoteOff(note);
+        const next = new Set(prev);
+        next.delete(note);
+        return next;
+      } else {
+        audioEngine.noteOn(note, velocity);
+        webrtcService.sendNoteOn(note, velocity);
+        return new Set(prev).add(note);
+      }
+    });
+  }, []);
+
+  const releaseAll = useCallback(() => {
+    audioEngine.allNotesOff();
+    setActiveNotes(new Set());
+  }, []);
+
+  // Transpose active notes when octave shift changes
+  useEffect(() => {
+    const delta = octaveShift - prevOctaveShift.current;
+    if (delta === 0) return;
+    prevOctaveShift.current = octaveShift;
+
+    setActiveNotes(prev => {
+      if (prev.size === 0) return prev;
+      const next = new Set<number>();
+      for (const note of prev) {
+        audioEngine.noteOff(note);
+        webrtcService.sendNoteOff(note);
+        const shifted = note + delta * 12;
+        audioEngine.noteOn(shifted, 100);
+        webrtcService.sendNoteOn(shifted, 100);
+        next.add(shifted);
+      }
+      return next;
+    });
+  }, [octaveShift]);
 
   // Computer keyboard input
   useEffect(() => {
@@ -69,7 +115,12 @@ export function Keyboard({ streamConnected }: Props) {
       const note = KEY_MAP[e.key.toLowerCase()];
       if (note !== undefined && !heldKeys.current.has(e.key)) {
         heldKeys.current.add(e.key);
-        triggerNoteOn(note + octaveShift * 12);
+        const shiftedNote = note + octaveShift * 12;
+        if (latchMode) {
+          toggleNote(shiftedNote);
+        } else {
+          triggerNoteOn(shiftedNote);
+        }
       }
     };
 
@@ -77,7 +128,9 @@ export function Keyboard({ streamConnected }: Props) {
       const note = KEY_MAP[e.key.toLowerCase()];
       if (note !== undefined) {
         heldKeys.current.delete(e.key);
-        triggerNoteOff(note + octaveShift * 12);
+        if (!latchMode) {
+          triggerNoteOff(note + octaveShift * 12);
+        }
       }
     };
 
@@ -87,11 +140,11 @@ export function Keyboard({ streamConnected }: Props) {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [octaveShift, triggerNoteOn, triggerNoteOff]);
+  }, [octaveShift, latchMode, triggerNoteOn, triggerNoteOff, toggleNote]);
 
   // Visual piano: 3 octaves
   const startNote = 48 + octaveShift * 12;
-  const keys = [];
+  const keys: { note: number; black: boolean; name: string }[] = [];
   for (let i = 0; i < 37; i++) { // C3 to C6
     const note = startNote + i;
     const black = isBlackKey(note);
@@ -105,11 +158,41 @@ export function Keyboard({ streamConnected }: Props) {
     return entry ? entry[0].toUpperCase() : '';
   };
 
+  const handleKeyClick = (note: number) => {
+    if (latchMode) {
+      toggleNote(note);
+    } else {
+      triggerNoteOn(note);
+    }
+  };
+
+  const handleKeyRelease = (note: number) => {
+    if (!latchMode) {
+      triggerNoteOff(note);
+    }
+  };
+
+  const handleKeyLeave = (note: number) => {
+    if (!latchMode && activeNotes.has(note)) {
+      triggerNoteOff(note);
+    }
+  };
+
   return (
     <div className="keyboard-container">
       <div className="keyboard-header">
-        <span className="octave-label">Octave: {octaveShift >= 0 ? '+' : ''}{octaveShift}</span>
         <span className="key-hint">Z/X = octave down/up</span>
+        <button
+          className={`latch-btn ${latchMode ? 'latched' : ''}`}
+          onClick={() => setLatchMode(prev => !prev)}
+        >
+          {latchMode ? 'LATCH ON' : 'LATCH'}
+        </button>
+        {latchMode && (
+          <button className="release-btn" onClick={releaseAll}>
+            RELEASE ALL
+          </button>
+        )}
         {!streamConnected && <span className="hint">Select a live source to play</span>}
       </div>
       <div className="piano">
@@ -117,9 +200,9 @@ export function Keyboard({ streamConnected }: Props) {
           <div
             key={k.note}
             className={`piano-key white ${activeNotes.has(k.note) ? 'active' : ''}`}
-            onMouseDown={() => triggerNoteOn(k.note)}
-            onMouseUp={() => triggerNoteOff(k.note)}
-            onMouseLeave={() => { if (activeNotes.has(k.note)) triggerNoteOff(k.note); }}
+            onMouseDown={() => handleKeyClick(k.note)}
+            onMouseUp={() => handleKeyRelease(k.note)}
+            onMouseLeave={() => handleKeyLeave(k.note)}
           >
             <span className="key-label">{keyLabel(k.note)}</span>
             <span className="note-name">{k.name}</span>
@@ -134,9 +217,9 @@ export function Keyboard({ streamConnected }: Props) {
               key={k.note}
               className={`piano-key black ${activeNotes.has(k.note) ? 'active' : ''}`}
               style={{ left: `${leftPercent}%` }}
-              onMouseDown={() => triggerNoteOn(k.note)}
-              onMouseUp={() => triggerNoteOff(k.note)}
-              onMouseLeave={() => { if (activeNotes.has(k.note)) triggerNoteOff(k.note); }}
+              onMouseDown={() => handleKeyClick(k.note)}
+              onMouseUp={() => handleKeyRelease(k.note)}
+              onMouseLeave={() => handleKeyLeave(k.note)}
             >
               <span className="key-label">{keyLabel(k.note)}</span>
             </div>
