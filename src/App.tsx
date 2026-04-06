@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { StreamSelector } from './components/StreamSelector';
+import { SourceBackdrop } from './components/SourceBackdrop';
 import { Keyboard } from './components/Keyboard';
 import { ChordPad } from './components/ChordPad';
 import { Visualizer } from './components/Visualizer';
@@ -7,40 +8,49 @@ import { Controls } from './components/Controls';
 import { MidiPanel } from './components/MidiPanel';
 import { WebRTCPanel } from './components/WebRTCPanel';
 import { midiService } from './services/MidiService';
-import './App.css';
 
 function App() {
   const [streamConnected, setStreamConnected] = useState(false);
+  const [activeSourceIds, setActiveSourceIds] = useState<Set<string>>(new Set());
   const [showMidi, setShowMidi] = useState(false);
   const [showWebRTC, setShowWebRTC] = useState(false);
-  const [octaveShift, setOctaveShift] = useState(0);
 
   useEffect(() => {
     midiService.init();
   }, []);
 
   return (
-    <div className="app">
-      <header>
-        <h1>Live Stream Instrument</h1>
-        <span className="subtitle">resonant filters on live audio from the real world</span>
+    <div className="relative max-w-[960px] mx-auto p-4">
+      <SourceBackdrop activeIds={activeSourceIds} />
+
+      <header className="flex items-baseline gap-3 mb-4">
+        <h1 className="text-lg font-semibold text-white">Resonator</h1>
       </header>
 
-      <StreamSelector onConnected={() => setStreamConnected(true)} />
+      <StreamSelector
+        onConnected={() => setStreamConnected(true)}
+        onActiveChange={setActiveSourceIds}
+      />
 
       <Visualizer />
 
-      <Controls octaveShift={octaveShift} setOctaveShift={setOctaveShift} />
+      <Controls activeSourceIds={activeSourceIds} />
 
-      <Keyboard streamConnected={streamConnected} octaveShift={octaveShift} setOctaveShift={setOctaveShift} />
+      <Keyboard streamConnected={streamConnected} />
 
-      <ChordPad streamConnected={streamConnected} octaveShift={octaveShift} />
+      <ChordPad streamConnected={streamConnected} />
 
-      <div className="panels-toggle">
-        <button className={showMidi ? 'active' : ''} onClick={() => setShowMidi(!showMidi)}>
+      <div className="flex gap-2 mb-2">
+        <button
+          className={`px-4 py-1.5 border rounded font-mono text-[11px] font-semibold cursor-pointer ${showMidi ? 'bg-[#1a2a3a] border-[#3a5a7a] text-[#8ab]' : 'bg-[#141414] border-[#2a2a2a] text-[#666]'}`}
+          onClick={() => setShowMidi(!showMidi)}
+        >
           MIDI
         </button>
-        <button className={showWebRTC ? 'active' : ''} onClick={() => setShowWebRTC(!showWebRTC)}>
+        <button
+          className={`px-4 py-1.5 border rounded font-mono text-[11px] font-semibold cursor-pointer ${showWebRTC ? 'bg-[#1a2a3a] border-[#3a5a7a] text-[#8ab]' : 'bg-[#141414] border-[#2a2a2a] text-[#666]'}`}
+          onClick={() => setShowWebRTC(!showWebRTC)}
+        >
           WebRTC
         </button>
       </div>

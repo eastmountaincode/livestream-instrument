@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import Hls from 'hls.js';
 import { audioEngine } from '../services/AudioEngine';
 import { LIVE_SOURCES, getOrcasoundStreamUrl } from '../services/streams';
@@ -6,36 +6,83 @@ import type { LiveSource } from '../services/streams';
 
 interface Props {
   onConnected: () => void;
+  onActiveChange: (ids: Set<string>) => void;
 }
 
-export function StreamSelector({ onConnected }: Props) {
-  const [selectedId, setSelectedId] = useState('');
-  const [status, setStatus] = useState<'idle' | 'loading' | 'connected' | 'error'>('idle');
-  const [errorMsg, setErrorMsg] = useState('');
-  // Keep refs to old HLS instances so they stay alive during crossfade
-  const hlsInstances = useRef<Hls[]>([]);
+interface ActiveStream {
+  hls?: Hls;
+}
+
+const typeIconColors: Record<string, string> = {
+  'hydrophone': 'text-[#4a9eff]',
+  'weather-radio': 'text-[#ffaa33]',
+  'vlf': 'text-[#cc66ff]',
+  'soundscape': 'text-[#66cc88]',
+};
+
+export function StreamSelector({ onConnected, onActiveChange }: Props) {
+  const [activeIds, setActiveIds] = useState<Set<string>>(new Set());
+  const [loadingIds, setLoadingIds] = useState<Set<string>>(new Set());
+  const [errors, setErrors] = useState<Map<string, string>>(new Map());
+  const activeStreams = useRef<Map<string, ActiveStream>>(new Map());
+
+  useEffect(() => {
+    onActiveChange(activeIds);
+  }, [activeIds, onActiveChange]);
+
+  const disconnect = useCallback((sourceId: string) => {
+    audioEngine.removeStream(sourceId);
+    const stream = activeStreams.current.get(sourceId);
+    if (stream?.hls) {
+      stream.hls.destroy();
+    }
+    activeStreams.current.delete(sourceId);
+    setActiveIds(prev => {
+      const next = new Set(prev);
+      next.delete(sourceId);
+      return next;
+    });
+  }, []);
 
   const connect = useCallback(async (source: LiveSource) => {
-    setStatus('loading');
-    setErrorMsg('');
+    setLoadingIds(prev => new Set(prev).add(source.id));
+    setErrors(prev => {
+      const next = new Map(prev);
+      next.delete(source.id);
+      return next;
+    });
 
     await audioEngine.resume();
 
-    // Create a fresh audio element for the new source
     const audio = new Audio();
     audio.crossOrigin = 'anonymous';
 
     const onReady = () => {
-      // connectStream handles crossfade internally
-      audioEngine.connectStream(audio);
+      audioEngine.addStream(source.id, audio);
       audio.play();
-      setStatus('connected');
+      setLoadingIds(prev => {
+        const next = new Set(prev);
+        next.delete(source.id);
+        return next;
+      });
+      setActiveIds(prev => new Set(prev).add(source.id));
       onConnected();
     };
 
     const onError = (msg: string) => {
-      setStatus('error');
-      setErrorMsg(msg);
+      setLoadingIds(prev => {
+        const next = new Set(prev);
+        next.delete(source.id);
+        return next;
+      });
+      setErrors(prev => new Map(prev).set(source.id, msg));
+      setTimeout(() => {
+        setErrors(prev => {
+          const next = new Map(prev);
+          next.delete(source.id);
+          return next;
+        });
+      }, 5000);
     };
 
     try {
@@ -47,66 +94,97 @@ export function StreamSelector({ onConnected }: Props) {
             liveSyncDurationCount: 3,
             liveMaxLatencyDurationCount: 6,
           });
-          hlsInstances.current.push(hls);
-          // Clean up old HLS instances after crossfade (keep last 2)
-          while (hlsInstances.current.length > 2) {
-            const old = hlsInstances.current.shift();
-            old?.destroy();
-          }
+          activeStreams.current.set(source.id, { hls });
 
           hls.loadSource(hlsUrl);
           hls.attachMedia(audio);
           hls.on(Hls.Events.MANIFEST_PARSED, onReady);
-          hls.on(Hls.Events.ERROR, (_event, data) => {
-            if (data.fatal) onError(`HLS error: ${data.type}`);
+
+          let retryCount = 0;
+          const MAX_RETRIES = 3;
+          hls.on(Hls.Events.ERROR, async (_event, data) => {
+            if (!data.fatal) return;
+
+            if (data.type === Hls.ErrorTypes.NETWORK_ERROR && retryCount < MAX_RETRIES) {
+              retryCount++;
+              try {
+                const freshUrl = await getOrcasoundStreamUrl(source);
+                if (freshUrl !== hlsUrl) {
+                  hls.loadSource(freshUrl);
+                } else {
+                  hls.startLoad();
+                }
+              } catch {
+                hls.startLoad();
+              }
+            } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR && retryCount < MAX_RETRIES) {
+              retryCount++;
+              hls.recoverMediaError();
+            } else {
+              onError(`HLS error: ${data.type}`);
+            }
           });
         } else if (audio.canPlayType('application/vnd.apple.mpegurl')) {
           audio.src = hlsUrl;
           audio.addEventListener('canplay', onReady, { once: true });
           audio.addEventListener('error', () => onError('Failed to load HLS stream'), { once: true });
           audio.load();
+          activeStreams.current.set(source.id, {});
         }
       } else if (source.url) {
         audio.src = source.url;
         audio.addEventListener('canplay', onReady, { once: true });
         audio.addEventListener('error', () => onError('Failed to load stream'), { once: true });
         audio.load();
+        activeStreams.current.set(source.id, {});
       }
     } catch (err) {
       onError(String(err));
     }
   }, [onConnected]);
 
+  const toggle = useCallback((source: LiveSource) => {
+    if (activeIds.has(source.id)) {
+      disconnect(source.id);
+    } else {
+      connect(source);
+    }
+  }, [activeIds, connect, disconnect]);
+
   const typeIcons: Record<string, string> = {
     'hydrophone': '~',
     'weather-radio': '>',
     'vlf': '*',
+    'soundscape': '◦',
   };
 
   return (
-    <div className="stream-selector">
-      <h3>Live Source</h3>
-      <div className="source-list">
+    <div className="mb-3">
+      <h3 className="text-xs text-[#666] mb-2 font-medium">Live Source</h3>
+      <div className="flex flex-wrap gap-1 mb-1.5">
         {LIVE_SOURCES.map(source => (
           <button
             key={source.id}
-            className={`source-btn ${selectedId === source.id ? 'selected' : ''} type-${source.type}`}
-            onClick={() => {
-              setSelectedId(source.id);
-              connect(source);
-            }}
+            className={`flex items-center gap-1 px-2 py-1 border rounded font-mono text-[11px] cursor-pointer transition-all duration-100 ${
+              activeIds.has(source.id)
+                ? 'border-[#4a7] bg-[#112211] text-[#8dc]'
+                : 'border-[#2a2a2a] bg-[#161616] text-[#999] hover:border-[#444] hover:text-[#ddd]'
+            }`}
+            onClick={() => toggle(source)}
             title={`${source.description}\n${source.location}`}
           >
-            <span className="source-icon">{typeIcons[source.type]}</span>
-            <span className="source-name">{source.name}</span>
-            <span className="source-location">{source.location}</span>
+            <span className={`font-bold text-[13px] ${typeIconColors[source.type] || ''}`}>{typeIcons[source.type]}</span>
+            <span className="font-medium">{source.name}</span>
+            <span className="text-[#555] text-[10px]">{source.location}</span>
           </button>
         ))}
       </div>
-      <div className="stream-status">
-        {status === 'loading' && <span className="status loading">connecting...</span>}
-        {status === 'connected' && <span className="status connected">live</span>}
-        {status === 'error' && <span className="status error">{errorMsg}</span>}
+      <div className="min-h-[18px]">
+        {loadingIds.size > 0 && <span className="text-[10px] px-2 py-0.5 rounded-sm text-[#fa0] bg-[#332200]">connecting...</span>}
+        {activeIds.size > 0 && <span className="text-[10px] px-2 py-0.5 rounded-sm text-[#4c4] bg-[#113311]">{activeIds.size} source{activeIds.size > 1 ? 's' : ''} live</span>}
+        {Array.from(errors.entries()).map(([id, msg]) => (
+          <span key={id} className="text-[10px] px-2 py-0.5 rounded-sm text-[#f44] bg-[#331111]">{msg}</span>
+        ))}
       </div>
     </div>
   );

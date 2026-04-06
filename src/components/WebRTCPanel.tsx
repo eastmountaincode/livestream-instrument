@@ -49,71 +49,106 @@ export function WebRTCPanel() {
     webrtcService.stopLeaderClock();
   };
 
+  const statusBadgeClass = (s: string) => {
+    switch (s) {
+      case 'connected': return 'text-[#4c4] bg-[#113311]';
+      case 'connecting': return 'text-[#fa0] bg-[#332200]';
+      default: return 'text-[#888] bg-[#222]';
+    }
+  };
+
   return (
-    <div className="panel webrtc-panel">
-      <h3>WebRTC Peer Sync</h3>
-      <div className="connection-status">
-        Status: <span className={`status-badge ${state}`}>{state}</span>
+    <div className="bg-[#141414] rounded-md p-3 mb-2">
+      <h3 className="text-[13px] font-semibold mb-2 text-[#aaa]">WebRTC Peer Sync</h3>
+      <div className="mb-2 text-xs">
+        Status: <span className={`px-2 py-0.5 rounded-sm text-[11px] font-semibold ${statusBadgeClass(state)}`}>{state}</span>
       </div>
 
       {state === 'disconnected' && (
-        <div className="webrtc-setup">
-          <div className="setup-section">
-            <h4>Create Session (Leader)</h4>
-            <button onClick={handleCreateOffer}>Generate Offer</button>
+        <div className="flex flex-col gap-3">
+          <div>
+            <h4 className="text-[11px] text-[#888] mb-1.5 font-medium">Create Session (Leader)</h4>
+            <button
+              className="py-[5px] px-3.5 border border-[#333] rounded-sm bg-[#222] text-[#aaa] cursor-pointer font-mono text-[11px] mr-1.5 hover:bg-[#2a2a2a] hover:text-[#ddd]"
+              onClick={handleCreateOffer}
+            >Generate Offer</button>
           </div>
 
-          <div className="setup-section">
-            <h4>Join Session (Follower)</h4>
+          <div>
+            <h4 className="text-[11px] text-[#888] mb-1.5 font-medium">Join Session (Follower)</h4>
             <textarea
+              className="w-full bg-[#1a1a1a] border border-[#333] rounded-sm text-[#ddd] font-mono text-[10px] p-1.5 resize-y mb-1"
               placeholder="Paste offer here..."
               value={offerText}
               onChange={e => setOfferText(e.target.value)}
               rows={3}
             />
-            <button onClick={handleAcceptOffer} disabled={!offerText}>Join</button>
+            <button
+              className="py-[5px] px-3.5 border border-[#333] rounded-sm bg-[#222] text-[#aaa] cursor-pointer font-mono text-[11px] mr-1.5 hover:bg-[#2a2a2a] hover:text-[#ddd]"
+              onClick={handleAcceptOffer}
+              disabled={!offerText}
+            >Join</button>
           </div>
         </div>
       )}
 
       {state === 'connecting' && localSignal && (
-        <div className="webrtc-setup">
-          <div className="setup-section">
-            <h4>Your Signal (copy & send to peer)</h4>
-            <textarea readOnly value={localSignal} rows={3}
-              onClick={e => (e.target as HTMLTextAreaElement).select()} />
+        <div className="flex flex-col gap-3">
+          <div>
+            <h4 className="text-[11px] text-[#888] mb-1.5 font-medium">Your Signal (copy & send to peer)</h4>
+            <textarea
+              className="w-full bg-[#1a1a1a] border border-[#333] rounded-sm text-[#ddd] font-mono text-[10px] p-1.5 resize-y mb-1"
+              readOnly
+              value={localSignal}
+              rows={3}
+              onClick={e => (e.target as HTMLTextAreaElement).select()}
+            />
           </div>
 
           {role === 'leader' && (
-            <div className="setup-section">
-              <h4>Paste Peer's Answer</h4>
+            <div>
+              <h4 className="text-[11px] text-[#888] mb-1.5 font-medium">Paste Peer's Answer</h4>
               <textarea
+                className="w-full bg-[#1a1a1a] border border-[#333] rounded-sm text-[#ddd] font-mono text-[10px] p-1.5 resize-y mb-1"
                 placeholder="Paste answer here..."
                 value={answerText}
                 onChange={e => setAnswerText(e.target.value)}
                 rows={3}
               />
-              <button onClick={handleAcceptAnswer} disabled={!answerText}>Connect</button>
+              <button
+                className="py-[5px] px-3.5 border border-[#333] rounded-sm bg-[#222] text-[#aaa] cursor-pointer font-mono text-[11px] mr-1.5 hover:bg-[#2a2a2a] hover:text-[#ddd]"
+                onClick={handleAcceptAnswer}
+                disabled={!answerText}
+              >Connect</button>
             </div>
           )}
         </div>
       )}
 
       {state === 'connected' && (
-        <div className="webrtc-connected">
-          <p>Connected as <strong>{role}</strong></p>
+        <div>
+          <p className="mb-2 text-xs">Connected as <strong>{role}</strong></p>
           {role === 'leader' && (
             <div>
-              <button onClick={handleStartSync}>Start Clock Sync</button>
-              <button onClick={handleStopSync}>Stop Clock</button>
+              <button
+                className="py-[5px] px-3.5 border border-[#333] rounded-sm bg-[#222] text-[#aaa] cursor-pointer font-mono text-[11px] mr-1.5 hover:bg-[#2a2a2a] hover:text-[#ddd]"
+                onClick={handleStartSync}
+              >Start Clock Sync</button>
+              <button
+                className="py-[5px] px-3.5 border border-[#333] rounded-sm bg-[#222] text-[#aaa] cursor-pointer font-mono text-[11px] mr-1.5 hover:bg-[#2a2a2a] hover:text-[#ddd]"
+                onClick={handleStopSync}
+              >Stop Clock</button>
             </div>
           )}
-          <button className="disconnect-btn" onClick={() => webrtcService.disconnect()}>
+          <button
+            className="py-[5px] px-3.5 border border-[#533] rounded-sm bg-[#222] text-[#c66] cursor-pointer font-mono text-[11px] mr-1.5 hover:bg-[#2a2a2a] hover:text-[#ddd]"
+            onClick={() => webrtcService.disconnect()}
+          >
             Disconnect
           </button>
           {messages.length > 0 && (
-            <div className="message-log">
-              {messages.map((m, i) => <div key={i} className="msg">{m}</div>)}
+            <div className="mt-2 max-h-[100px] overflow-y-auto text-[10px]">
+              {messages.map((m, i) => <div key={i} className="text-[#666] py-px border-b border-[#1a1a1a]">{m}</div>)}
             </div>
           )}
         </div>

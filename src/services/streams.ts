@@ -2,8 +2,9 @@ export interface LiveSource {
   id: string;
   name: string;
   location: string;
-  type: 'hydrophone' | 'weather-radio' | 'vlf';
+  type: 'hydrophone' | 'weather-radio' | 'vlf' | 'soundscape';
   description: string;
+  imageUrl?: string;
   // For HLS streams (Orcasound)
   hlsBucket?: string;
   hlsNode?: string;
@@ -14,21 +15,13 @@ export interface LiveSource {
 // All sources are TRULY LIVE — real microphones/antennas pointed at the world right now
 export const LIVE_SOURCES: LiveSource[] = [
   // --- Orcasound Hydrophones (HLS via S3, CORS: *) ---
-  {
-    id: 'orca-lab',
-    name: 'Orcasound Lab',
-    location: 'Haro Strait, WA',
-    type: 'hydrophone',
-    description: 'Underwater mic in orca habitat, Haro Strait',
-    hlsBucket: 'audio-orcasound-net',
-    hlsNode: 'rpi_orcasound_lab',
-  },
-  {
+{
     id: 'orca-port-townsend',
     name: 'Port Townsend',
     location: 'Port Townsend, WA',
     type: 'hydrophone',
     description: 'Hydrophone in Admiralty Inlet',
+    imageUrl: 'https://s3-us-west-2.amazonaws.com/orcasite/rpi_port_townsend/thumbnail.png',
     hlsBucket: 'audio-orcasound-net',
     hlsNode: 'rpi_port_townsend',
   },
@@ -38,6 +31,7 @@ export const LIVE_SOURCES: LiveSource[] = [
     location: 'San Juan Island, WA',
     type: 'hydrophone',
     description: 'Hydrophone near Sunset Bay',
+    imageUrl: 'https://s3-us-west-2.amazonaws.com/orcasite/rpi_sunset_bay/thumbnail.png',
     hlsBucket: 'audio-orcasound-net',
     hlsNode: 'rpi_sunset_bay',
   },
@@ -47,66 +41,47 @@ export const LIVE_SOURCES: LiveSource[] = [
     location: 'San Juan Islands, WA',
     type: 'hydrophone',
     description: 'North San Juan Channel hydrophone',
+    imageUrl: 'https://s3-us-west-2.amazonaws.com/orcasite/rpi_north_sjc/thumbnail.png',
     hlsBucket: 'audio-orcasound-net',
     hlsNode: 'rpi_north_sjc',
   },
-  // --- Lime Kiln Hydrophone (Icecast MP3) ---
   {
-    id: 'lime-kiln',
-    name: 'Lime Kiln Lighthouse',
+    id: 'orca-andrews-bay',
+    name: 'Andrews Bay',
     location: 'San Juan Island, WA',
     type: 'hydrophone',
-    description: 'Hydrophone at 7m depth near lighthouse, orca habitat',
-    url: 'https://proxy.tpa-01.stream101.com/proxy/smrucons?mp=/;stream',
+    description: 'Hydrophone near San Juan County Park, between Orcasound Lab and Lime Kiln',
+    imageUrl: '/images/andrews-bay.jpg',
+    hlsBucket: 'audio-orcasound-net',
+    hlsNode: 'rpi_andrews_bay',
   },
-  // --- NOAA Weather Radio (wxradio.org, CORS: *, truly live SDR receivers) ---
+  // --- Locustream Soundscapes (Icecast via locusonus/creacast) ---
   {
-    id: 'wx-monterey-marine',
-    name: 'Monterey Marine',
-    location: 'Monterey, CA',
-    type: 'weather-radio',
-    description: 'NOAA marine weather, 162.450 MHz',
-    url: 'https://wxradio.org/CA-MontereyMarine-WWF64',
-  },
-  {
-    id: 'wx-puget-sound',
-    name: 'Puget Sound Marine',
-    location: 'Puget Sound, WA',
-    type: 'weather-radio',
-    description: 'NOAA marine weather for Puget Sound',
-    url: 'https://wxradio.org/WA-PugetSoundMarine-WWG24',
+    id: 'ls-yamanakako',
+    name: 'Yamanakako',
+    location: 'Yamanashi, Japan',
+    type: 'soundscape',
+    description: 'Open mic near Lake Yamanaka, Mt Fuji — University of Tokyo Forests',
+    imageUrl: '/images/yamanakako.jpg',
+    url: '/proxy/cyberforest/Fuji_CyberForest.mp3',
   },
   {
-    id: 'wx-galveston',
-    name: 'Galveston Coast',
-    location: 'Galveston, TX',
-    type: 'weather-radio',
-    description: 'NOAA coastal weather',
-    url: 'https://wxradio.org/TX-Galveston-KHB40',
+    id: 'ls-zalubice',
+    name: 'Summer House',
+    location: 'Zalubice Nowe, Poland',
+    type: 'soundscape',
+    description: 'Open mic at a summer house in rural Poland',
+    imageUrl: '/images/zalubice.jpg',
+    url: 'https://locus.creacast.com:9443/zalubice_nowe_summer_house.mp3',
   },
   {
-    id: 'wx-atlanta',
-    name: 'Atlanta Weather',
-    location: 'Atlanta, GA',
-    type: 'weather-radio',
-    description: 'NOAA Weather Radio KEC80',
-    url: 'https://wxradio.org/GA-Atlanta-KEC80',
-  },
-  {
-    id: 'wx-pittsburgh',
-    name: 'Pittsburgh Weather',
-    location: 'Pittsburgh, PA',
-    type: 'weather-radio',
-    description: 'NOAA Weather Radio KIH35',
-    url: 'https://wxradio.org/PA-Pittsburgh-KIH35',
-  },
-  {
-    id: 'wx-dallas',
-    name: 'Dallas Weather',
-    location: 'Dallas, TX',
-    type: 'weather-radio',
-    description: 'NOAA Weather Radio KEC56',
-    url: 'https://wxradio.org/TX-Dallas-KEC56',
+    id: 'ls-wave-farm',
+    name: 'Pond Station',
+    location: 'Wave Farm, NY',
+    type: 'soundscape',
+    description: 'Pond station at Wave Farm, upstate New York',
+    imageUrl: '/images/wave-farm.jpg',
+    url: '/proxy/wavefarm/pondstation.mp3',
   },
 ];
 

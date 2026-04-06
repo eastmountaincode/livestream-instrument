@@ -32,37 +32,50 @@ export function MidiPanel() {
   };
 
   if (!available) {
-    return <div className="panel midi-panel"><h3>MIDI</h3><p className="dim">Web MIDI not available</p></div>;
+    return (
+      <div className="bg-[#141414] rounded-md p-3 mb-2">
+        <h3 className="text-[13px] font-semibold mb-2 text-[#aaa]">MIDI</h3>
+        <p className="text-[#555]">Web MIDI not available</p>
+      </div>
+    );
   }
 
   return (
-    <div className="panel midi-panel">
-      <h3>MIDI</h3>
-      <p className="dim" style={{ marginBottom: 8, fontSize: 10 }}>
+    <div className="bg-[#141414] rounded-md p-3 mb-2">
+      <h3 className="text-[13px] font-semibold mb-2 text-[#aaa]">MIDI</h3>
+      <p className="text-[#555] mb-2 text-[10px]">
         Plug in a MIDI keyboard to play. Mod wheel (CC1) controls resonance.
       </p>
-      <div className="midi-row">
-        <label>
+      <div className="flex gap-3 items-center mb-2 flex-wrap">
+        <label className="flex items-center gap-1.5 text-[#888] text-[11px]">
           Input
-          <select value={selectedInput || ''} onChange={e => {
-            midiService.selectInput(e.target.value || null);
-            setSelectedInput(e.target.value || null);
-          }}>
+          <select
+            className="bg-[#1a1a1a] border border-[#333] rounded-sm text-[#ddd] font-mono text-[11px] py-[3px] px-1.5"
+            value={selectedInput || ''}
+            onChange={e => {
+              midiService.selectInput(e.target.value || null);
+              setSelectedInput(e.target.value || null);
+            }}
+          >
             <option value="">None</option>
             {inputs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
         </label>
-        <label>
+        <label className="flex items-center gap-1.5 text-[#888] text-[11px]">
           Output
-          <select value={selectedOutput || ''} onChange={e => {
-            midiService.selectOutput(e.target.value || null);
-            setSelectedOutput(e.target.value || null);
-          }}>
+          <select
+            className="bg-[#1a1a1a] border border-[#333] rounded-sm text-[#ddd] font-mono text-[11px] py-[3px] px-1.5"
+            value={selectedOutput || ''}
+            onChange={e => {
+              midiService.selectOutput(e.target.value || null);
+              setSelectedOutput(e.target.value || null);
+            }}
+          >
             <option value="">None</option>
             {outputs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
         </label>
-        {lastCC && <span className="midi-monitor">{lastCC}</span>}
+        {lastCC && <span className="text-[#4a9] text-[10px]">{lastCC}</span>}
       </div>
     </div>
   );
