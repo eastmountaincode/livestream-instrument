@@ -8,6 +8,7 @@ import { saveActiveStreams, getSavedState } from '../services/storage';
 interface Props {
   onConnected: () => void;
   onActiveChange: (ids: Set<string>) => void;
+  autoRestore?: boolean;
 }
 
 interface ActiveStream {
@@ -21,7 +22,7 @@ const typeIconColors: Record<string, string> = {
   'soundscape': 'text-[#66cc88]',
 };
 
-export function StreamSelector({ onConnected, onActiveChange }: Props) {
+export function StreamSelector({ onConnected, onActiveChange, autoRestore }: Props) {
   const [activeIds, setActiveIds] = useState<Set<string>>(new Set());
   const [loadingIds, setLoadingIds] = useState<Set<string>>(new Set());
   const [errors, setErrors] = useState<Map<string, string>>(new Map());
@@ -148,31 +149,17 @@ export function StreamSelector({ onConnected, onActiveChange }: Props) {
     }
   }, [onConnected]);
 
-  // Auto-reconnect saved streams after first user interaction (needed for AudioContext)
+  // Auto-reconnect saved streams (AudioContext already resumed by Start button)
   useEffect(() => {
-    if (restoredRef.current) return;
+    if (!autoRestore || restoredRef.current) return;
+    restoredRef.current = true;
     const saved = getSavedState();
-    if (!saved?.activeStreamIds.length) {
-      restoredRef.current = true;
-      return;
+    if (!saved?.activeStreamIds.length) return;
+    for (const id of saved.activeStreamIds) {
+      const source = LIVE_SOURCES.find(s => s.id === id);
+      if (source) connect(source);
     }
-    const restore = () => {
-      if (restoredRef.current) return;
-      restoredRef.current = true;
-      for (const id of saved.activeStreamIds) {
-        const source = LIVE_SOURCES.find(s => s.id === id);
-        if (source) connect(source);
-      }
-      document.removeEventListener('pointerdown', restore);
-      document.removeEventListener('keydown', restore);
-    };
-    document.addEventListener('pointerdown', restore, { once: true });
-    document.addEventListener('keydown', restore, { once: true });
-    return () => {
-      document.removeEventListener('pointerdown', restore);
-      document.removeEventListener('keydown', restore);
-    };
-  }, [connect]);
+  }, [autoRestore, connect]);
 
   const toggle = useCallback((source: LiveSource) => {
     if (activeIds.has(source.id)) {

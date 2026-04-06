@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { StreamSelector } from './components/StreamSelector';
 import { SourceBackdrop } from './components/SourceBackdrop';
 import { Keyboard } from './components/Keyboard';
@@ -8,16 +8,47 @@ import { Controls } from './components/Controls';
 import { MidiPanel } from './components/MidiPanel';
 import { WebRTCPanel } from './components/WebRTCPanel';
 import { midiService } from './services/MidiService';
+import { audioEngine } from './services/AudioEngine';
+import { getSavedState } from './services/storage';
 
 function App() {
+  const [started, setStarted] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [streamConnected, setStreamConnected] = useState(false);
   const [activeSourceIds, setActiveSourceIds] = useState<Set<string>>(new Set());
   const [showMidi, setShowMidi] = useState(false);
   const [showWebRTC, setShowWebRTC] = useState(false);
 
+  const hasSavedStreams = getSavedState()?.activeStreamIds?.length ?? 0;
+
   useEffect(() => {
     midiService.init();
   }, []);
+
+  const handleStart = useCallback(async () => {
+    setLoading(true);
+    await audioEngine.resume();
+    setStarted(true);
+    // StreamSelector will handle reconnecting saved streams
+  }, []);
+
+  if (!started) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen gap-6">
+        <h1 className="text-2xl font-semibold text-white/40">Resonator</h1>
+        <button
+          onClick={handleStart}
+          disabled={loading}
+          className="px-8 py-3 border border-[#333] rounded-md bg-[#1a1a1a] text-white/70 font-mono text-sm cursor-pointer hover:bg-[#252525] hover:text-white hover:border-[#555] transition-all duration-200 disabled:opacity-50 disabled:cursor-wait"
+        >
+          {loading ? 'connecting...' : hasSavedStreams ? 'Resume Session' : 'Start'}
+        </button>
+        {hasSavedStreams > 0 && !loading && (
+          <p className="text-[11px] text-white/20">{hasSavedStreams} saved source{hasSavedStreams > 1 ? 's' : ''} will reconnect</p>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="relative max-w-[960px] mx-auto p-4">
@@ -28,8 +59,9 @@ function App() {
       </header>
 
       <StreamSelector
-        onConnected={() => setStreamConnected(true)}
+        onConnected={() => { setStreamConnected(true); setLoading(false); }}
         onActiveChange={setActiveSourceIds}
+        autoRestore
       />
 
       <Visualizer />
