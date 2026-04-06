@@ -148,16 +148,30 @@ export function StreamSelector({ onConnected, onActiveChange }: Props) {
     }
   }, [onConnected]);
 
-  // Auto-reconnect saved streams on mount
+  // Auto-reconnect saved streams after first user interaction (needed for AudioContext)
   useEffect(() => {
     if (restoredRef.current) return;
-    restoredRef.current = true;
     const saved = getSavedState();
-    if (!saved?.activeStreamIds.length) return;
-    for (const id of saved.activeStreamIds) {
-      const source = LIVE_SOURCES.find(s => s.id === id);
-      if (source) connect(source);
+    if (!saved?.activeStreamIds.length) {
+      restoredRef.current = true;
+      return;
     }
+    const restore = () => {
+      if (restoredRef.current) return;
+      restoredRef.current = true;
+      for (const id of saved.activeStreamIds) {
+        const source = LIVE_SOURCES.find(s => s.id === id);
+        if (source) connect(source);
+      }
+      document.removeEventListener('pointerdown', restore);
+      document.removeEventListener('keydown', restore);
+    };
+    document.addEventListener('pointerdown', restore, { once: true });
+    document.addEventListener('keydown', restore, { once: true });
+    return () => {
+      document.removeEventListener('pointerdown', restore);
+      document.removeEventListener('keydown', restore);
+    };
   }, [connect]);
 
   const toggle = useCallback((source: LiveSource) => {
