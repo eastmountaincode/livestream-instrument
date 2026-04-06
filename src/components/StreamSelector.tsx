@@ -26,10 +26,13 @@ export function StreamSelector({ onConnected, onActiveChange }: Props) {
   const [loadingIds, setLoadingIds] = useState<Set<string>>(new Set());
   const [errors, setErrors] = useState<Map<string, string>>(new Map());
   const activeStreams = useRef<Map<string, ActiveStream>>(new Map());
+  const restoredRef = useRef(false);
 
   useEffect(() => {
     onActiveChange(activeIds);
-    saveActiveStreams(Array.from(activeIds));
+    if (restoredRef.current) {
+      saveActiveStreams(Array.from(activeIds));
+    }
   }, [activeIds, onActiveChange]);
 
   const disconnect = useCallback((sourceId: string) => {
@@ -146,7 +149,6 @@ export function StreamSelector({ onConnected, onActiveChange }: Props) {
   }, [onConnected]);
 
   // Auto-reconnect saved streams on mount
-  const restoredRef = useRef(false);
   useEffect(() => {
     if (restoredRef.current) return;
     restoredRef.current = true;
