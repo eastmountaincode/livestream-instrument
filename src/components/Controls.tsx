@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { audioEngine } from '../services/AudioEngine';
 import { LIVE_SOURCES } from '../services/streams';
+import { saveStreamSettings, getStreamSettings, saveSoloId, getSavedState } from '../services/storage';
 
 interface Props {
   activeSourceIds: Set<string>;
@@ -8,11 +9,30 @@ interface Props {
 
 function StreamControls({ id, soloId, onSolo }: { id: string; soloId: string | null; onSolo: (id: string | null) => void }) {
   const source = LIVE_SOURCES.find(s => s.id === id);
-  const [q, setQ] = useState(() => audioEngine.getStreamFilterQ(id));
-  const [vol, setVol] = useState(() => audioEngine.getStreamVolume(id));
-  const [oct, setOct] = useState(() => audioEngine.getStreamOctave(id));
-  const [pan, setPan] = useState(() => audioEngine.getStreamPan(id));
-  const [muted, setMuted] = useState(() => audioEngine.getStreamMuted(id));
+  const initRef = useRef(false);
+
+  // Load saved settings once and use as initial state
+  const [saved] = useState(() => getStreamSettings(id));
+  const [q, setQ] = useState(() => saved?.filterQ ?? audioEngine.getStreamFilterQ(id));
+  const [vol, setVol] = useState(() => saved?.volume ?? audioEngine.getStreamVolume(id));
+  const [oct, setOct] = useState(() => saved?.octaveShift ?? audioEngine.getStreamOctave(id));
+  const [pan, setPan] = useState(() => saved?.pan ?? audioEngine.getStreamPan(id));
+  const [muted, setMuted] = useState(() => saved?.muted ?? audioEngine.getStreamMuted(id));
+
+  // Apply saved settings to audio engine once on mount
+  useEffect(() => {
+    if (initRef.current || !saved) return;
+    initRef.current = true;
+    audioEngine.setStreamFilterQ(id, saved.filterQ);
+    audioEngine.setStreamVolume(id, saved.volume);
+    audioEngine.setStreamPan(id, saved.pan);
+    audioEngine.setStreamOctave(id, saved.octaveShift);
+    audioEngine.setStreamMuted(id, saved.muted);
+  }, [id, saved]);
+
+  const persist = useCallback((overrides: Partial<{ filterQ: number; volume: number; pan: number; octaveShift: number; muted: boolean }>) => {
+    saveStreamSettings(id, { filterQ: overrides.filterQ ?? q, volume: overrides.volume ?? vol, pan: overrides.pan ?? pan, octaveShift: overrides.octaveShift ?? oct, muted: overrides.muted ?? muted });
+  }, [id, q, vol, pan, oct, muted]);
 
   return (
     <div className={`flex items-center gap-2 py-1 border-b border-[#1e1e1e] last:border-b-0 ${muted ? '[&_.sc-name]:opacity-40 [&_.sc-label]:opacity-40 [&_.sc-value]:opacity-40' : ''}`}>
@@ -30,6 +50,7 @@ function StreamControls({ id, soloId, onSolo }: { id: string; soloId: string | n
             const val = parseFloat(e.target.value);
             setQ(val);
             audioEngine.setStreamFilterQ(id, val);
+            persist({ filterQ: val });
           }}
         />
         <span className="sc-value text-[11px] text-[#6a8aaa] min-w-[30px] text-right">{q.toFixed(0)}</span>
@@ -47,6 +68,7 @@ function StreamControls({ id, soloId, onSolo }: { id: string; soloId: string | n
             const val = parseFloat(e.target.value);
             setVol(val);
             audioEngine.setStreamVolume(id, val);
+            persist({ volume: val });
           }}
         />
         <span className="sc-value text-[11px] text-[#6a8aaa] min-w-[30px] text-right">{Math.round(vol * 100)}%</span>
@@ -64,6 +86,7 @@ function StreamControls({ id, soloId, onSolo }: { id: string; soloId: string | n
             const val = parseFloat(e.target.value);
             setPan(val);
             audioEngine.setStreamPan(id, val);
+            persist({ pan: val });
           }}
         />
         <span className="sc-value text-[11px] text-[#6a8aaa] min-w-[30px] text-right">{pan === 0 ? 'C' : pan < 0 ? `L${Math.round(Math.abs(pan) * 100)}` : `R${Math.round(pan * 100)}`}</span>
@@ -75,6 +98,7 @@ function StreamControls({ id, soloId, onSolo }: { id: string; soloId: string | n
             const next = oct - 1;
             setOct(next);
             audioEngine.setStreamOctave(id, next);
+            persist({ octaveShift: next });
           }}
         >-</button>
         <span>Oct {oct >= 0 ? `+${oct}` : oct}</span>
@@ -84,6 +108,7 @@ function StreamControls({ id, soloId, onSolo }: { id: string; soloId: string | n
             const next = oct + 1;
             setOct(next);
             audioEngine.setStreamOctave(id, next);
+            persist({ octaveShift: next });
           }}
         >+</button>
       </div>
@@ -97,6 +122,7 @@ function StreamControls({ id, soloId, onSolo }: { id: string; soloId: string | n
           const next = soloId === id ? null : id;
           onSolo(next);
           audioEngine.setStreamSolo(next);
+          saveSoloId(next);
         }}
       >
         S
@@ -111,6 +137,7 @@ function StreamControls({ id, soloId, onSolo }: { id: string; soloId: string | n
           const next = !muted;
           setMuted(next);
           audioEngine.setStreamMuted(id, next);
+          persist({ muted: next });
         }}
       >
         M
@@ -121,7 +148,7 @@ function StreamControls({ id, soloId, onSolo }: { id: string; soloId: string | n
 
 export function Controls({ activeSourceIds }: Props) {
   const [streamIds, setStreamIds] = useState<string[]>([]);
-  const [soloId, setSoloId] = useState<string | null>(null);
+  const [soloId, setSoloId] = useState<string | null>(() => getSavedState()?.soloId ?? null);
 
   useEffect(() => {
     setStreamIds(Array.from(activeSourceIds));

@@ -3,6 +3,7 @@ import Hls from 'hls.js';
 import { audioEngine } from '../services/AudioEngine';
 import { LIVE_SOURCES, getOrcasoundStreamUrl } from '../services/streams';
 import type { LiveSource } from '../services/streams';
+import { saveActiveStreams, getSavedState } from '../services/storage';
 
 interface Props {
   onConnected: () => void;
@@ -28,6 +29,7 @@ export function StreamSelector({ onConnected, onActiveChange }: Props) {
 
   useEffect(() => {
     onActiveChange(activeIds);
+    saveActiveStreams(Array.from(activeIds));
   }, [activeIds, onActiveChange]);
 
   const disconnect = useCallback((sourceId: string) => {
@@ -142,6 +144,19 @@ export function StreamSelector({ onConnected, onActiveChange }: Props) {
       onError(String(err));
     }
   }, [onConnected]);
+
+  // Auto-reconnect saved streams on mount
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    const saved = getSavedState();
+    if (!saved?.activeStreamIds.length) return;
+    for (const id of saved.activeStreamIds) {
+      const source = LIVE_SOURCES.find(s => s.id === id);
+      if (source) connect(source);
+    }
+  }, [connect]);
 
   const toggle = useCallback((source: LiveSource) => {
     if (activeIds.has(source.id)) {
