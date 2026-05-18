@@ -9,11 +9,12 @@ type SaveState = 'idle' | 'loading' | 'saving' | 'saved' | 'error';
 interface ApiResponse {
   candidates?: StreamCandidate[];
   configured?: boolean;
+  writable?: boolean;
   error?: string;
 }
 
 const STATUS_OPTIONS: StreamReviewStatus[] = ['unreviewed', 'accepted', 'rejected'];
-const fieldClass = 'h-8 w-full border-2 border-black bg-white px-2 text-black outline-none focus:bg-[#f3d85a]';
+const fieldClass = 'h-9 w-full border-2 border-black bg-white px-3 text-black outline-none focus:bg-[#f3d85a] disabled:bg-[#f2f0e8] disabled:text-black/60';
 
 function statusClass(status: StreamReviewStatus): string {
   if (status === 'accepted') return 'border-black bg-black text-white';
@@ -183,11 +184,14 @@ export function StreamCandidateTable() {
   const [saveState, setSaveState] = useState<SaveState>('loading');
   const [error, setError] = useState('');
   const [configured, setConfigured] = useState(true);
+  const [writable, setWritable] = useState(false);
   const [query, setQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState<StreamReviewStatus | 'all'>('all');
   const [now, setNow] = useState(() => new Date());
   const hasLoaded = useRef(false);
+  const editVersion = useRef(0);
+  const savedVersion = useRef(0);
 
   const categories = useMemo(() => (
     Array.from(new Set(candidates.map(candidate => candidate.category).filter(Boolean))).sort()
@@ -229,6 +233,7 @@ export function StreamCandidateTable() {
         if (cancelled) return;
         setCandidates(payload.candidates ?? []);
         setConfigured(payload.configured ?? false);
+        setWritable(payload.writable ?? false);
         setSaveState('idle');
         hasLoaded.current = true;
       } catch (loadError) {
@@ -245,7 +250,8 @@ export function StreamCandidateTable() {
   }, []);
 
   useEffect(() => {
-    if (!hasLoaded.current || !configured) return;
+    if (!hasLoaded.current || !configured || !writable || savedVersion.current === editVersion.current) return;
+    const versionToSave = editVersion.current;
 
     const timeout = window.setTimeout(async () => {
       setSaveState('saving');
@@ -260,7 +266,9 @@ export function StreamCandidateTable() {
         const payload = await response.json() as ApiResponse;
         if (!response.ok) throw new Error(payload.error || 'Failed to save stream candidates');
         setConfigured(payload.configured ?? configured);
-        setSaveState('saved');
+        setWritable(payload.writable ?? writable);
+        savedVersion.current = Math.max(savedVersion.current, versionToSave);
+        setSaveState(editVersion.current === versionToSave ? 'saved' : 'saving');
       } catch (saveError) {
         setError(saveError instanceof Error ? saveError.message : 'Failed to save stream candidates');
         setSaveState('error');
@@ -268,9 +276,10 @@ export function StreamCandidateTable() {
     }, 700);
 
     return () => window.clearTimeout(timeout);
-  }, [candidates, configured]);
+  }, [candidates, configured, writable]);
 
   const updateCandidate = (id: string, patch: Partial<StreamCandidate>) => {
+    editVersion.current += 1;
     setCandidates(current => current.map(candidate => (
       candidate.id === id
         ? { ...candidate, ...patch, updatedAt: new Date().toISOString() }
@@ -279,6 +288,7 @@ export function StreamCandidateTable() {
   };
 
   const removeCandidate = (id: string) => {
+    editVersion.current += 1;
     setCandidates(current => current.filter(candidate => candidate.id !== id));
   };
 
@@ -303,14 +313,14 @@ export function StreamCandidateTable() {
             <span className="border-2 border-black px-2 py-1">{counts.rejected} rejected</span>
             <span className="border-2 border-black px-2 py-1">{counts.unreviewed} unreviewed</span>
             <span className={saveState === 'error' ? 'border-2 border-black bg-[#f18a7a] px-2 py-1 text-black' : 'border-2 border-black px-2 py-1 text-black'}>
-              {saveState === 'loading' ? 'loading' : saveState === 'saving' ? 'saving' : saveState === 'saved' ? 'saved' : saveState === 'error' ? 'error' : configured ? 'ready' : 'R2 missing'}
+              {saveState === 'loading' ? 'loading' : saveState === 'saving' ? 'saving' : saveState === 'saved' ? 'saved' : saveState === 'error' ? 'error' : writable ? 'ready' : 'read only'}
             </span>
           </div>
         </header>
 
-        {(!configured || error) && (
+        {(!configured || error || !writable) && (
           <div className="border-2 border-black bg-[#f3d85a] px-3 py-2 text-xs font-black uppercase text-black">
-            {error || 'R2 is not configured. Set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and R2_BUCKET to persist edits.'}
+            {error || 'Stream candidates are code-backed. Local edits save to src/data/streamCandidates.ts.'}
           </div>
         )}
 
@@ -344,18 +354,18 @@ export function StreamCandidateTable() {
         </section>
 
         <div className="overflow-x-auto border-2 border-black bg-white">
-          <table className="w-full min-w-[1550px] border-collapse text-left text-xs">
+          <table className="w-full min-w-[2370px] border-collapse text-left text-xs">
             <thead className="sticky top-0 z-10 bg-[#f2f0e8] text-[10px] font-black uppercase text-black/60">
               <tr>
                 <th className="w-[170px] border-b-2 border-r border-black px-2 py-2">Audition</th>
-                <th className="w-[118px] border-b-2 border-r border-black px-2 py-2">Status</th>
+                <th className="w-[210px] border-b-2 border-r border-black px-2 py-2">Status</th>
                 <th className="w-[170px] border-b-2 border-r border-black px-2 py-2">Category</th>
                 <th className="w-[210px] border-b-2 border-r border-black px-2 py-2">Name</th>
-                <th className="w-[170px] border-b-2 border-r border-black px-2 py-2">Location</th>
+                <th className="w-[250px] border-b-2 border-r border-black px-2 py-2">Location</th>
                 <th className="w-[100px] border-b-2 border-r border-black px-2 py-2">Local Time</th>
                 <th className="w-[300px] border-b-2 border-r border-black px-2 py-2">Stream URL</th>
                 <th className="w-[230px] border-b-2 border-r border-black px-2 py-2">Page</th>
-                <th className="w-[110px] border-b-2 border-r border-black px-2 py-2">Format</th>
+                <th className="w-[190px] border-b-2 border-r border-black px-2 py-2">Format</th>
                 <th className="w-[150px] border-b-2 border-r border-black px-2 py-2">Source</th>
                 <th className="w-[320px] border-b-2 border-r border-black px-2 py-2">Notes</th>
                 <th className="w-[68px] border-b-2 border-black px-2 py-2"></th>
@@ -367,10 +377,11 @@ export function StreamCandidateTable() {
                   <td className="border-r border-black px-2 py-2">
                     <AuditionCell candidate={candidate} />
                   </td>
-                  <td className="border-r border-black px-2 py-2">
+                  <td className="border-r border-black px-3 py-2">
                     <select
-                      className={`h-8 w-full border-2 px-2 font-black uppercase outline-none ${statusClass(candidate.status)}`}
+                      className={`h-9 w-full border-2 px-3 pr-10 font-black uppercase outline-none ${statusClass(candidate.status)}`}
                       value={candidate.status}
+                      disabled={!writable}
                       onChange={event => updateCandidate(candidate.id, { status: event.target.value as StreamReviewStatus })}
                     >
                       {STATUS_OPTIONS.map(status => (
@@ -383,6 +394,7 @@ export function StreamCandidateTable() {
                       list="stream-review-categories"
                       className={fieldClass}
                       value={candidate.category}
+                      disabled={!writable}
                       onChange={event => updateCandidate(candidate.id, { category: event.target.value })}
                     />
                   </td>
@@ -390,13 +402,15 @@ export function StreamCandidateTable() {
                     <input
                       className={fieldClass}
                       value={candidate.name}
+                      disabled={!writable}
                       onChange={event => updateCandidate(candidate.id, { name: event.target.value })}
                     />
                   </td>
-                  <td className="border-r border-black px-2 py-2">
+                  <td className="border-r border-black px-3 py-2">
                     <input
                       className={fieldClass}
                       value={candidate.location}
+                      disabled={!writable}
                       onChange={event => {
                         const location = event.target.value;
                         updateCandidate(candidate.id, {
@@ -415,6 +429,7 @@ export function StreamCandidateTable() {
                     <input
                       className={fieldClass}
                       value={candidate.streamUrl}
+                      disabled={!writable}
                       onChange={event => updateCandidate(candidate.id, { streamUrl: event.target.value })}
                     />
                   </td>
@@ -422,13 +437,15 @@ export function StreamCandidateTable() {
                     <input
                       className={fieldClass}
                       value={candidate.pageUrl}
+                      disabled={!writable}
                       onChange={event => updateCandidate(candidate.id, { pageUrl: event.target.value })}
                     />
                   </td>
-                  <td className="border-r border-black px-2 py-2">
+                  <td className="border-r border-black px-3 py-2">
                     <input
                       className={fieldClass}
                       value={candidate.format}
+                      disabled={!writable}
                       onChange={event => updateCandidate(candidate.id, { format: event.target.value })}
                     />
                   </td>
@@ -436,6 +453,7 @@ export function StreamCandidateTable() {
                     <input
                       className={fieldClass}
                       value={candidate.source}
+                      disabled={!writable}
                       onChange={event => updateCandidate(candidate.id, { source: event.target.value })}
                     />
                   </td>
@@ -443,6 +461,7 @@ export function StreamCandidateTable() {
                     <textarea
                       className="min-h-16 w-full resize-y border-2 border-black bg-white px-2 py-1.5 text-black outline-none focus:bg-[#f3d85a]"
                       value={candidate.notes}
+                      disabled={!writable}
                       onChange={event => updateCandidate(candidate.id, { notes: event.target.value })}
                     />
                   </td>
@@ -450,6 +469,7 @@ export function StreamCandidateTable() {
                     <button
                       type="button"
                       className="h-8 w-full border-2 border-black bg-white font-mono font-black uppercase text-black hover:bg-black hover:text-white"
+                      disabled={!writable}
                       onClick={() => removeCandidate(candidate.id)}
                       aria-label={`Delete ${candidate.name || 'stream row'}`}
                     >

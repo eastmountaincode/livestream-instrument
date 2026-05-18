@@ -72,21 +72,11 @@ export function StreamSelector({ onConnected, onActiveChange, onSourcesChange, o
       for (let attempt = 1; attempt <= SOURCE_LOAD_RETRIES; attempt++) {
         try {
           const result = await fetchAcceptedLiveSources();
-          const shouldRetryDegradedLoad = !result.configured && !result.fromCache && attempt < SOURCE_LOAD_RETRIES;
-
-          if (shouldRetryDegradedLoad) {
-            await wait(SOURCE_LOAD_RETRY_DELAY_MS * attempt);
-            continue;
-          }
 
           if (cancelled) return;
           setSources(result.sources);
           onSourcesChange?.(result.sources);
-          setSourceLoadError(result.configured
-            ? ''
-            : result.fromCache
-              ? 'stream database unavailable, using last saved source list'
-              : 'stream database unavailable, using bundled source list');
+          setSourceLoadError('');
           setSourcesReady(true);
           return;
         } catch (error) {
@@ -96,7 +86,7 @@ export function StreamSelector({ onConnected, onActiveChange, onSourcesChange, o
           }
 
           if (cancelled) return;
-          setSourceLoadError(error instanceof Error ? error.message : 'Failed to load stream database');
+          setSourceLoadError(error instanceof Error ? error.message : 'Failed to load stream catalog');
           setSources([]);
           onSourcesChange?.([]);
           setSourcesReady(true);
