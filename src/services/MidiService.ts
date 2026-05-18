@@ -6,8 +6,15 @@
 
 import { audioEngine } from './AudioEngine';
 
+const MIDI_SOURCE = 'midi';
+
 export type MidiDeviceInfo = { id: string; name: string };
 export type MidiUpdateCallback = () => void;
+
+interface HeldMidiNote {
+  count: number;
+  velocity: number;
+}
 
 class MidiService {
   private access: MIDIAccess | null = null;
@@ -15,6 +22,8 @@ class MidiService {
   private selectedOutput: MIDIOutput | null = null;
   private listeners: MidiUpdateCallback[] = [];
   private ccCallbacks: ((cc: number, value: number) => void)[] = [];
+  private inputVolume = 1;
+  private activeNotes: Map<number, HeldMidiNote> = new Map();
 
   async init(): Promise<boolean> {
     try {
@@ -73,6 +82,13 @@ class MidiService {
   getSelectedInputId() { return this.selectedInput?.id || null; }
   getSelectedOutputId() { return this.selectedOutput?.id || null; }
 
+  setInputVolume(volume: number) {
+    this.inputVolume = Number.isFinite(volume) ? Math.max(0, volume) : 1;
+    for (const [note, state] of this.activeNotes) {
+      audioEngine.updateNoteSourceVelocity(note, this.scaleVelocity(state.velocity), MIDI_SOURCE);
+    }
+  }
+
   onCC(cb: (cc: number, value: number) => void) {
     this.ccCallbacks.push(cb);
     return () => { this.ccCallbacks = this.ccCallbacks.filter(c => c !== cb); };
@@ -87,6 +103,10 @@ class MidiService {
     for (const l of this.listeners) l();
   }
 
+  private scaleVelocity(velocity: number) {
+    return Math.max(0, Math.round(velocity * this.inputVolume));
+  }
+
   private handleMidiMessage = (e: Event) => {
     if (!(e instanceof MIDIMessageEvent)) return;
     const data = e.data;
@@ -98,15 +118,22 @@ class MidiService {
       const note = data[1];
       const velocity = data[2];
       if (velocity > 0) {
-        audioEngine.noteOn(note, velocity);
+        const held = this.activeNotes.get(note);
+        if (held) {
+          held.count += 1;
+          held.velocity = Math.max(held.velocity, velocity);
+        } else {
+          this.activeNotes.set(note, { count: 1, velocity });
+        }
+        audioEngine.noteOn(note, this.scaleVelocity(velocity), MIDI_SOURCE);
       } else {
-        audioEngine.noteOff(note);
+        this.releaseMidiNote(note);
       }
     }
 
     // Note off: 0x80-0x8F
     if ((status & 0xF0) === 0x80 && data.length >= 3) {
-      audioEngine.noteOff(data[1]);
+      this.releaseMidiNote(data[1]);
     }
 
     // CC: 0xB0-0xBF
@@ -114,15 +141,22 @@ class MidiService {
       const cc = data[1];
       const value = data[2];
 
-      // CC1 (mod wheel) → filter Q
-      if (cc === 1) {
-        const q = 1 + (value / 127) * 99; // 1-100
-        audioEngine.setFilterQ(q);
-      }
-
       for (const cb of this.ccCallbacks) cb(cc, value);
     }
   };
+
+  private releaseMidiNote(note: number) {
+    const held = this.activeNotes.get(note);
+    if (!held) return;
+
+    if (held.count > 1) {
+      held.count -= 1;
+    } else {
+      this.activeNotes.delete(note);
+    }
+
+    audioEngine.noteOff(note, MIDI_SOURCE);
+  }
 }
 
 export const midiService = new MidiService();

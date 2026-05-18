@@ -19,7 +19,7 @@ export function Visualizer() {
       rafRef.current = requestAnimationFrame(draw);
       analyser.getByteFrequencyData(dataArray);
 
-      ctx.fillStyle = '#111';
+      ctx.fillStyle = '#fff';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       const barWidth = (canvas.width / bufferLength) * 2.5;
@@ -27,8 +27,8 @@ export function Visualizer() {
 
       for (let i = 0; i < bufferLength; i++) {
         const barHeight = (dataArray[i] / 255) * canvas.height;
-        const hue = (i / bufferLength) * 260 + 180;
-        ctx.fillStyle = `hsl(${hue}, 80%, ${40 + (dataArray[i] / 255) * 30}%)`;
+        const lightness = 12 + (dataArray[i] / 255) * 24;
+        ctx.fillStyle = `hsl(0, 0%, ${lightness}%)`;
         ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
         x += barWidth + 1;
       }
@@ -38,5 +38,5 @@ export function Visualizer() {
     return () => cancelAnimationFrame(rafRef.current);
   }, []);
 
-  return <canvas ref={canvasRef} className="w-full h-[60px] rounded mb-3" width={800} height={100} />;
+  return <canvas ref={canvasRef} className="h-[54px] w-full border-2 border-black bg-white" width={1200} height={100} />;
 }

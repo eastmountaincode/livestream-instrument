@@ -2,6 +2,8 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { audioEngine } from '../services/AudioEngine';
 import { webrtcService } from '../services/WebRTCService';
 
+const CHORD_PAD_SOURCE = 'chord-pad';
+
 // --- Chord definitions (intervals from root) ---
 const CHORD_TYPES: Record<string, { label: string; intervals: number[]; short: string }> = {
   'maj':      { label: 'Major',         intervals: [0, 4, 7],          short: '' },
@@ -41,9 +43,10 @@ const CHORD_GROUPS: { label: string; types: string[] }[] = [
 
 interface Props {
   streamConnected: boolean;
+  inputVolume: number;
 }
 
-export function ChordPad({ streamConnected }: Props) {
+export function ChordPad({ streamConnected, inputVolume }: Props) {
   const octave = 3; // Base octave 3 (C3 = MIDI 48)
   const [selectedRoot, setSelectedRoot] = useState(0); // C
   const [selectedType, setSelectedType] = useState('maj');
@@ -74,29 +77,37 @@ export function ChordPad({ streamConnected }: Props) {
     // Release previous notes
     for (const n of prevNotes.current) {
       if (!notes.includes(n)) {
-        audioEngine.noteOff(n);
+        audioEngine.noteOff(n, CHORD_PAD_SOURCE);
         webrtcService.sendNoteOff(n);
       }
     }
     // Play new notes (skip if already playing)
     for (const n of notes) {
       if (!prevNotes.current.includes(n)) {
-        audioEngine.noteOn(n, 100);
+        const scaledVelocity = Math.max(0, Math.round(100 * inputVolume));
+        audioEngine.noteOn(n, scaledVelocity, CHORD_PAD_SOURCE);
         webrtcService.sendNoteOn(n, 100);
       }
     }
     prevNotes.current = notes;
     setActiveChordNotes(notes);
-  }, []);
+  }, [inputVolume]);
 
   const releaseAll = useCallback(() => {
     for (const n of prevNotes.current) {
-      audioEngine.noteOff(n);
+      audioEngine.noteOff(n, CHORD_PAD_SOURCE);
       webrtcService.sendNoteOff(n);
     }
     prevNotes.current = [];
     setActiveChordNotes([]);
   }, []);
+
+  useEffect(() => {
+    const scaledVelocity = Math.max(0, Math.round(100 * inputVolume));
+    for (const note of prevNotes.current) {
+      audioEngine.updateNoteSourceVelocity(note, scaledVelocity, CHORD_PAD_SOURCE);
+    }
+  }, [inputVolume]);
 
   // When root/type/octave/inversion changes and notes are playing, update the chord
   useEffect(() => {
@@ -127,50 +138,50 @@ export function ChordPad({ streamConnected }: Props) {
   const maxInversion = (CHORD_TYPES[selectedType]?.intervals.length || 3) - 1;
 
   return (
-    <div className="bg-[#141414] rounded-md p-3 mb-3">
-      <div className="flex items-center gap-3 mb-2.5 flex-wrap">
-        <h3 className="text-[13px] font-semibold text-[#aaa] m-0">Chord Pad</h3>
-        <div className="text-base font-bold text-[#8ab] min-w-[60px]">
+    <div className="grid gap-3">
+      <div className="flex flex-wrap items-center gap-3 border-b-2 border-black pb-2">
+        <h3 className="m-0 text-[11px] font-black uppercase text-black">Chord Memory</h3>
+        <div className="min-w-[68px] border-2 border-black bg-white px-2 py-1 text-center font-mono text-base font-black text-black">
           {activeChordNotes.length > 0 ? chordLabel : '---'}
         </div>
         <button
-          className={`px-3 py-1 border rounded-sm cursor-pointer font-mono text-[10px] font-semibold tracking-wide ${
+          className={`border-2 px-3 py-1 font-mono text-[10px] font-black uppercase ${
             latched
-              ? 'bg-[#1a3a1a] border-[#4a4] text-[#6c6]'
-              : 'bg-[#1a1a1a] border-[#333] text-[#888]'
+              ? 'border-black bg-black text-white'
+              : 'border-black bg-white text-black hover:bg-black hover:text-white'
           }`}
           onClick={handleLatchToggle}
         >
           {latched ? 'LATCH ON' : 'LATCH OFF'}
         </button>
-        <div className="flex items-center gap-1 text-[11px] text-[#888]">
+        <div className="flex items-center gap-1 text-[11px] font-black uppercase text-black">
           <button
-            className="w-5 h-5 border border-[#333] rounded-sm bg-[#222] text-[#aaa] cursor-pointer text-xs flex items-center justify-center p-0"
+            className="flex h-6 w-6 items-center justify-center border-2 border-black bg-white p-0 text-xs text-black hover:bg-black hover:text-white"
             onClick={() => setInversion(Math.max(0, inversion - 1))}
           >-</button>
           <span>Inv {inversion}</span>
           <button
-            className="w-5 h-5 border border-[#333] rounded-sm bg-[#222] text-[#aaa] cursor-pointer text-xs flex items-center justify-center p-0"
+            className="flex h-6 w-6 items-center justify-center border-2 border-black bg-white p-0 text-xs text-black hover:bg-black hover:text-white"
             onClick={() => setInversion(Math.min(maxInversion, inversion + 1))}
           >+</button>
         </div>
         <button
-          className="px-2.5 py-1 border border-[#533] rounded-sm bg-[#1a1111] text-[#c88] cursor-pointer font-mono text-[10px] ml-auto hover:bg-[#2a1818]"
+          className="ml-auto border-2 border-black bg-white px-2.5 py-1 font-mono text-[10px] font-black uppercase text-black hover:bg-black hover:text-white"
           onClick={releaseAll}
         >Release</button>
       </div>
 
       {/* Root note selector */}
-      <div className="flex gap-[3px] mb-2.5">
+      <div className="grid grid-cols-12 gap-1">
         {ROOT_NOTES.map(({ name, semitone }) => (
           <button
             key={semitone}
-            className={`flex-1 py-1.5 px-0.5 border rounded-sm cursor-pointer font-mono text-[11px] font-semibold text-center ${
+            className={`border-2 px-0.5 py-1.5 text-center font-mono text-[11px] font-black ${
               selectedRoot === semitone
-                ? 'bg-[#1a2a4a] border-[#3a5a8a] text-[#8ab]'
+                ? 'border-black bg-black text-white'
                 : name.includes('#')
-                  ? 'bg-[#111] border-[#2a2a2a] text-[#888] hover:border-[#444] hover:text-white'
-                  : 'bg-[#1a1a1a] border-[#2a2a2a] text-[#bbb] hover:border-[#444] hover:text-white'
+                  ? 'border-black bg-black text-white hover:bg-[#2a2a2a]'
+                  : 'border-black bg-white text-black hover:bg-black hover:text-white'
             }`}
             onClick={() => {
               setSelectedRoot(semitone);
@@ -186,19 +197,19 @@ export function ChordPad({ streamConnected }: Props) {
 
       {/* Chord type grid */}
       {CHORD_GROUPS.map(group => (
-        <div key={group.label} className="flex items-center gap-1.5 mb-1.5">
-          <span className="text-[10px] text-[#555] min-w-[40px] text-right">{group.label}</span>
-          <div className="flex gap-[3px] flex-wrap">
+        <div key={group.label} className="grid gap-1 sm:grid-cols-[48px_minmax(0,1fr)] sm:items-start">
+          <span className="pt-1 text-right text-[10px] font-black uppercase text-black/55">{group.label}</span>
+          <div className="flex flex-wrap gap-1">
             {group.types.map(type => {
               const def = CHORD_TYPES[type];
               if (!def) return null;
               return (
                 <button
                   key={type}
-                  className={`py-[5px] px-2 border rounded-sm cursor-pointer font-mono text-[10px] min-w-[44px] text-center ${
+                  className={`min-w-[48px] border-2 px-2 py-[5px] text-center font-mono text-[10px] font-black ${
                     selectedType === type
-                      ? 'bg-[#1a2a4a] border-[#3a5a8a] text-[#8ab]'
-                      : 'bg-[#1a1a1a] border-[#2a2a2a] text-[#aaa] hover:border-[#444] hover:text-[#ddd]'
+                      ? 'border-black bg-black text-white'
+                      : 'border-black bg-white text-black hover:bg-black hover:text-white'
                   }`}
                   onClick={() => handleChordTrigger(selectedRoot, type)}
                   title={def.label}
@@ -212,23 +223,23 @@ export function ChordPad({ streamConnected }: Props) {
       ))}
 
       {/* Quick root+chord grid: all 12 roots as rows, common chords as columns */}
-      <div className="mt-3 border border-[#222] rounded overflow-hidden">
-        <div className="flex bg-[#111]">
-          <span className="min-w-[32px] py-[3px] px-1 text-[9px] text-[#555] text-center">Quick</span>
+      <div className="border-2 border-black">
+        <div className="flex border-b-2 border-black bg-[#f2f0e8]">
+          <span className="min-w-[36px] px-1 py-[3px] text-center text-[9px] font-black uppercase text-black/55">Quick</span>
           {['maj', 'min', 'maj7', 'min7', 'min9', 'min11', 'sus4'].map(type => (
-            <span key={type} className="flex-1 py-[3px] px-0.5 text-[9px] text-[#666] text-center font-semibold">{CHORD_TYPES[type].short || 'M'}</span>
+            <span key={type} className="flex-1 px-0.5 py-[3px] text-center text-[9px] font-black text-black/60">{CHORD_TYPES[type].short || 'M'}</span>
           ))}
         </div>
         {ROOT_NOTES.map(({ name, semitone }) => (
-          <div key={semitone} className="flex border-t border-[#1a1a1a]">
-            <span className={`min-w-[32px] py-[3px] px-1 text-[10px] font-semibold text-center bg-[#111] flex items-center justify-center ${name.includes('#') ? 'text-[#666]' : 'text-[#888]'}`}>{name}</span>
+          <div key={semitone} className="flex border-t border-black first:border-t-0">
+            <span className={`flex min-w-[36px] items-center justify-center px-1 py-[3px] text-center text-[10px] font-black ${name.includes('#') ? 'bg-black text-white' : 'bg-white text-black'}`}>{name}</span>
             {['maj', 'min', 'maj7', 'min7', 'min9', 'min11', 'sus4'].map(type => (
               <button
                 key={type}
-                className={`flex-1 py-1 px-0.5 border-none border-l border-[#1a1a1a] cursor-pointer font-mono text-[9px] text-center ${
+                className={`flex-1 border-l border-black px-0.5 py-1 text-center font-mono text-[9px] font-black ${
                   selectedRoot === semitone && selectedType === type && activeChordNotes.length > 0
-                    ? 'bg-[#1a3a5a] text-[#8bc] font-semibold'
-                    : 'bg-[#161616] text-[#777] hover:bg-[#222] hover:text-[#ccc]'
+                    ? 'bg-black text-white'
+                    : 'bg-white text-black hover:bg-black hover:text-white'
                 }`}
                 onClick={() => handleChordTrigger(semitone, type)}
               >
@@ -239,7 +250,7 @@ export function ChordPad({ streamConnected }: Props) {
         ))}
       </div>
 
-      {!streamConnected && <p className="text-[#555] text-[10px] ml-auto italic mt-2">Select a live source first</p>}
+      {!streamConnected && <p className="m-0 border-2 border-black px-2 py-1 text-[10px] font-black uppercase text-black/55">Select a live source first</p>}
     </div>
   );
 }

@@ -2,16 +2,48 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { audioEngine } from '../services/AudioEngine';
 import { webrtcService } from '../services/WebRTCService';
 
-// Computer keyboard → MIDI note mapping (2 octaves starting at C3)
-const KEY_MAP: Record<string, number> = {
-  // Lower row: C3 - B3
-  'a': 48, 'w': 49, 's': 50, 'e': 51, 'd': 52,
-  'f': 53, 't': 54, 'g': 55, 'y': 56, 'h': 57,
-  'u': 58, 'j': 59,
-  // Upper row: C4 - E5
-  'k': 60, 'o': 61, 'l': 62, 'p': 63, ';': 64,
-  "'": 65, ']': 66, '\\': 67,
-};
+const KEYBOARD_SOURCE = 'keyboard';
+const MIN_BASE_OCTAVE = 1;
+const MAX_BASE_OCTAVE = 5;
+
+interface KeyBinding {
+  code: string;
+  label: string;
+  offset: number;
+}
+
+// Physical keyboard layout based on KeyboardEvent.code, so it stays consistent
+// even if the user's OS keyboard layout is not US English.
+const KEY_BINDINGS: KeyBinding[] = [
+  { code: 'KeyA', label: 'A', offset: 0 },
+  { code: 'KeyW', label: 'W', offset: 1 },
+  { code: 'KeyS', label: 'S', offset: 2 },
+  { code: 'KeyE', label: 'E', offset: 3 },
+  { code: 'KeyD', label: 'D', offset: 4 },
+  { code: 'KeyF', label: 'F', offset: 5 },
+  { code: 'KeyT', label: 'T', offset: 6 },
+  { code: 'KeyG', label: 'G', offset: 7 },
+  { code: 'KeyY', label: 'Y', offset: 8 },
+  { code: 'KeyH', label: 'H', offset: 9 },
+  { code: 'KeyU', label: 'U', offset: 10 },
+  { code: 'KeyJ', label: 'J', offset: 11 },
+  { code: 'KeyK', label: 'K', offset: 12 },
+  { code: 'KeyO', label: 'O', offset: 13 },
+  { code: 'KeyL', label: 'L', offset: 14 },
+  { code: 'KeyP', label: 'P', offset: 15 },
+  { code: 'Semicolon', label: ';', offset: 16 },
+  { code: 'Quote', label: '\'', offset: 17 },
+  { code: 'BracketRight', label: ']', offset: 18 },
+  { code: 'Backslash', label: '\\', offset: 19 },
+];
+
+const KEY_BINDINGS_BY_CODE = new Map(KEY_BINDINGS.map(binding => [binding.code, binding]));
+const KEY_LABELS_BY_OFFSET = KEY_BINDINGS.reduce<Map<number, string[]>>((map, binding) => {
+  const labels = map.get(binding.offset) ?? [];
+  labels.push(binding.label);
+  map.set(binding.offset, labels);
+  return map;
+}, new Map());
 
 // Note names for display
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -27,21 +59,24 @@ function isBlackKey(midi: number): boolean {
 
 interface Props {
   streamConnected: boolean;
+  inputVolume: number;
 }
 
-export function Keyboard({ streamConnected }: Props) {
+export function Keyboard({ streamConnected, inputVolume }: Props) {
   const [activeNotes, setActiveNotes] = useState<Set<number>>(new Set());
   const [latchMode, setLatchMode] = useState(false);
-  const heldKeys = useRef<Set<string>>(new Set());
+  const [baseOctave, setBaseOctave] = useState(3);
+  const heldKeyNotes = useRef<Map<string, number>>(new Map());
 
   const triggerNoteOn = useCallback((note: number, velocity = 100) => {
-    audioEngine.noteOn(note, velocity);
+    const scaledVelocity = Math.max(0, Math.round(velocity * inputVolume));
+    audioEngine.noteOn(note, scaledVelocity, KEYBOARD_SOURCE);
     webrtcService.sendNoteOn(note, velocity);
     setActiveNotes(prev => new Set(prev).add(note));
-  }, []);
+  }, [inputVolume]);
 
   const triggerNoteOff = useCallback((note: number) => {
-    audioEngine.noteOff(note);
+    audioEngine.noteOff(note, KEYBOARD_SOURCE);
     webrtcService.sendNoteOff(note);
     setActiveNotes(prev => {
       const next = new Set(prev);
@@ -53,33 +88,81 @@ export function Keyboard({ streamConnected }: Props) {
   const toggleNote = useCallback((note: number, velocity = 100) => {
     setActiveNotes(prev => {
       if (prev.has(note)) {
-        audioEngine.noteOff(note);
+        audioEngine.noteOff(note, KEYBOARD_SOURCE);
         webrtcService.sendNoteOff(note);
         const next = new Set(prev);
         next.delete(note);
         return next;
       } else {
-        audioEngine.noteOn(note, velocity);
+        const scaledVelocity = Math.max(0, Math.round(velocity * inputVolume));
+        audioEngine.noteOn(note, scaledVelocity, KEYBOARD_SOURCE);
         webrtcService.sendNoteOn(note, velocity);
         return new Set(prev).add(note);
       }
     });
-  }, []);
+  }, [inputVolume]);
 
   const releaseAll = useCallback(() => {
-    audioEngine.allNotesOff();
+    for (const note of activeNotes) {
+      webrtcService.sendNoteOff(note);
+    }
+    audioEngine.allNotesOff(KEYBOARD_SOURCE);
     setActiveNotes(new Set());
+    heldKeyNotes.current.clear();
+  }, [activeNotes]);
+
+  useEffect(() => {
+    const scaledVelocity = Math.max(0, Math.round(100 * inputVolume));
+    for (const note of activeNotes) {
+      audioEngine.updateNoteSourceVelocity(note, scaledVelocity, KEYBOARD_SOURCE);
+    }
+  }, [activeNotes, inputVolume]);
+
+  const nudgeBaseOctave = useCallback((delta: number) => {
+    setBaseOctave(prev => Math.max(MIN_BASE_OCTAVE, Math.min(MAX_BASE_OCTAVE, prev + delta)));
   }, []);
 
   // Computer keyboard input
   useEffect(() => {
+    const isTextEntryTarget = (target: EventTarget | null) => (
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement ||
+      (target instanceof HTMLElement && target.isContentEditable)
+    );
+
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (isTextEntryTarget(e.target)) return;
       if (e.repeat) return;
 
-      const note = KEY_MAP[e.key.toLowerCase()];
-      if (note !== undefined && !heldKeys.current.has(e.key)) {
-        heldKeys.current.add(e.key);
+      if (e.code === 'ArrowDown') {
+        e.preventDefault();
+        nudgeBaseOctave(-1);
+        return;
+      }
+
+      if (e.code === 'ArrowUp') {
+        e.preventDefault();
+        nudgeBaseOctave(1);
+        return;
+      }
+
+      if (e.code === 'Escape' || e.code === 'Space') {
+        e.preventDefault();
+        releaseAll();
+        return;
+      }
+
+      const binding = KEY_BINDINGS_BY_CODE.get(e.code);
+      if (!binding || heldKeyNotes.current.has(e.code)) return;
+
+      const note = (baseOctave + 1) * 12 + binding.offset;
+      heldKeyNotes.current.set(e.code, note);
+      e.preventDefault();
+
+      if (!streamConnected) return;
+
+      if (note !== undefined) {
         if (latchMode) {
           toggleNote(note);
         } else {
@@ -89,22 +172,31 @@ export function Keyboard({ streamConnected }: Props) {
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      const note = KEY_MAP[e.key.toLowerCase()];
-      if (note !== undefined) {
-        heldKeys.current.delete(e.key);
-        if (!latchMode) {
-          triggerNoteOff(note);
-        }
+      const note = heldKeyNotes.current.get(e.code);
+      if (note === undefined) return;
+
+      heldKeyNotes.current.delete(e.code);
+      if (!latchMode) {
+        triggerNoteOff(note);
+      }
+    };
+
+    const handleWindowBlur = () => {
+      heldKeyNotes.current.clear();
+      if (!latchMode) {
+        releaseAll();
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleWindowBlur);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleWindowBlur);
     };
-  }, [latchMode, triggerNoteOn, triggerNoteOff, toggleNote]);
+  }, [baseOctave, latchMode, nudgeBaseOctave, releaseAll, streamConnected, toggleNote, triggerNoteOff, triggerNoteOn]);
 
   // Visual piano: 3 octaves starting at C3
   const startNote = 48;
@@ -115,8 +207,8 @@ export function Keyboard({ streamConnected }: Props) {
   }
 
   const keyLabel = (note: number): string => {
-    const entry = Object.entries(KEY_MAP).find(([, n]) => n === note);
-    return entry ? entry[0].toUpperCase() : '';
+    const offset = note - ((baseOctave + 1) * 12);
+    return (KEY_LABELS_BY_OFFSET.get(offset) ?? []).join(' ');
   };
 
   const handleKeyClick = (note: number) => {
@@ -143,45 +235,62 @@ export function Keyboard({ streamConnected }: Props) {
   const blackKeys = keys.filter(k => k.black);
 
   return (
-    <div className="mb-3">
-      <div className="flex items-center gap-3 mb-1.5 px-1">
+    <div className="grid gap-3">
+      <div className="flex flex-wrap items-center gap-3 border-b-2 border-black pb-2">
         <button
-          className={`px-3 py-1 border rounded-sm cursor-pointer font-mono text-[10px] font-semibold tracking-wide ${
+          className={`border-2 px-3 py-1 font-mono text-[10px] font-black uppercase ${
             latchMode
-              ? 'bg-[#1a3a1a] border-[#4a4] text-[#6c6]'
-              : 'bg-[#1a1a1a] border-[#333] text-[#888]'
+              ? 'border-black bg-black text-white'
+              : 'border-black bg-white text-black hover:bg-black hover:text-white'
           }`}
           onClick={() => setLatchMode(prev => !prev)}
         >
           {latchMode ? 'LATCH ON' : 'LATCH'}
         </button>
+        <div className="flex items-center gap-1 text-[11px] font-black uppercase text-black">
+          <button
+            className="flex h-6 w-6 items-center justify-center border-2 border-black bg-white p-0 text-xs text-black hover:bg-black hover:text-white disabled:opacity-30"
+            onClick={() => nudgeBaseOctave(-1)}
+            disabled={baseOctave <= MIN_BASE_OCTAVE}
+          >
+            -
+          </button>
+          <span>Keys C{baseOctave}-G{baseOctave + 1}</span>
+          <button
+            className="flex h-6 w-6 items-center justify-center border-2 border-black bg-white p-0 text-xs text-black hover:bg-black hover:text-white disabled:opacity-30"
+            onClick={() => nudgeBaseOctave(1)}
+            disabled={baseOctave >= MAX_BASE_OCTAVE}
+          >
+            +
+          </button>
+        </div>
         {latchMode && (
           <button
-            className="px-2.5 py-1 border border-[#533] rounded-sm bg-[#1a1111] text-[#c88] cursor-pointer font-mono text-[10px] hover:bg-[#2a1818]"
+            className="border-2 border-black bg-[#f3d85a] px-2.5 py-1 font-mono text-[10px] font-black uppercase text-black hover:bg-black hover:text-white"
             onClick={releaseAll}
           >
             RELEASE ALL
           </button>
         )}
-        {!streamConnected && <span className="text-[#555] text-[10px] ml-auto italic">Select a live source to play</span>}
+        {!streamConnected && <span className="ml-auto border-2 border-black px-2 py-1 text-[10px] font-black uppercase text-black/55">Select a live source to play</span>}
       </div>
-      <div className="relative h-[140px] flex">
+      <div className="relative flex h-[168px] border-2 border-black bg-white">
         {whiteKeys.map(k => {
           const active = activeNotes.has(k.note);
           return (
             <div
               key={k.note}
-              className={`relative cursor-pointer flex flex-col items-center justify-end flex-1 h-full border rounded-b transition-[background] duration-50 z-[1] pb-1.5 ${
+              className={`relative z-[1] flex h-full flex-1 cursor-pointer flex-col items-center justify-end border-r-2 border-black pb-1.5 transition-[background] duration-50 last:border-r-0 ${
                 active
-                  ? 'bg-[#1a3a5a] border-[#3a6a9a] shadow-[0_0_12px_rgba(58,106,154,0.4)]'
-                  : 'bg-[#1a1a1a] border-[#2a2a2a] hover:bg-[#222]'
+                  ? 'bg-black text-white'
+                  : 'bg-white text-black hover:bg-[#f2f0e8]'
               }`}
               onMouseDown={() => handleKeyClick(k.note)}
               onMouseUp={() => handleKeyRelease(k.note)}
               onMouseLeave={() => handleKeyLeave(k.note)}
             >
-              <span className={`text-[9px] font-semibold ${active ? 'text-[#8ab]' : 'text-[#444]'}`}>{keyLabel(k.note)}</span>
-              <span className={`text-[8px] ${active ? 'text-[#6a8aaa]' : 'text-[#333]'}`}>{k.name}</span>
+              <span className={`text-[9px] font-black ${active ? 'text-white' : 'text-black/55'}`}>{keyLabel(k.note)}</span>
+              <span className={`text-[8px] font-bold ${active ? 'text-white/70' : 'text-black/40'}`}>{k.name}</span>
             </div>
           );
         })}
@@ -192,17 +301,17 @@ export function Keyboard({ streamConnected }: Props) {
           return (
             <div
               key={k.note}
-              className={`absolute w-[3.2%] h-[60%] cursor-pointer flex flex-col items-center justify-end rounded-b-sm transition-[background] duration-50 z-[2] pb-1 ${
+              className={`absolute z-[2] flex h-[60%] w-[3.2%] cursor-pointer flex-col items-center justify-end border-2 border-black pb-1 transition-[background] duration-50 ${
                 active
-                  ? 'bg-[#1a3050] border border-[#2a5080] shadow-[0_0_10px_rgba(42,80,128,0.5)]'
-                  : 'bg-[#0a0a0a] border border-[#222] hover:bg-[#151515]'
+                  ? 'bg-[#f3d85a] text-black'
+                  : 'bg-black text-white hover:bg-[#2a2a2a]'
               }`}
               style={{ left: `${leftPercent}%` }}
               onMouseDown={() => handleKeyClick(k.note)}
               onMouseUp={() => handleKeyRelease(k.note)}
               onMouseLeave={() => handleKeyLeave(k.note)}
             >
-              <span className={`text-[9px] font-semibold ${active ? 'text-[#8ab]' : 'text-[#444]'}`}>{keyLabel(k.note)}</span>
+              <span className={`text-[9px] font-black ${active ? 'text-black' : 'text-white/65'}`}>{keyLabel(k.note)}</span>
             </div>
           );
         })}

@@ -33,24 +33,24 @@ export function MidiPanel() {
 
   if (!available) {
     return (
-      <div className="bg-[#141414] rounded-md p-3 mb-2">
-        <h3 className="text-[13px] font-semibold mb-2 text-[#aaa]">MIDI</h3>
-        <p className="text-[#555]">Web MIDI not available</p>
+      <div className="border-2 border-black bg-white p-3">
+        <h3 className="mb-2 text-[11px] font-black uppercase text-black">MIDI</h3>
+        <p className="m-0 text-[11px] font-bold uppercase text-black/55">Web MIDI not available</p>
       </div>
     );
   }
 
   return (
-    <div className="bg-[#141414] rounded-md p-3 mb-2">
-      <h3 className="text-[13px] font-semibold mb-2 text-[#aaa]">MIDI</h3>
-      <p className="text-[#555] mb-2 text-[10px]">
+    <div className="border-2 border-black bg-white p-3">
+      <h3 className="mb-2 text-[11px] font-black uppercase text-black">MIDI</h3>
+      <p className="mb-3 text-[10px] font-bold uppercase text-black/55">
         Plug in a MIDI keyboard to play. Mod wheel (CC1) controls resonance.
       </p>
-      <div className="flex gap-3 items-center mb-2 flex-wrap">
-        <label className="flex items-center gap-1.5 text-[#888] text-[11px]">
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="flex items-center gap-1.5 text-[11px] font-black uppercase text-black">
           Input
           <select
-            className="bg-[#1a1a1a] border border-[#333] rounded-sm text-[#ddd] font-mono text-[11px] py-[3px] px-1.5"
+            className="border-2 border-black bg-white px-1.5 py-[3px] font-mono text-[11px] font-bold text-black"
             value={selectedInput || ''}
             onChange={e => {
               midiService.selectInput(e.target.value || null);
@@ -61,10 +61,10 @@ export function MidiPanel() {
             {inputs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
         </label>
-        <label className="flex items-center gap-1.5 text-[#888] text-[11px]">
+        <label className="flex items-center gap-1.5 text-[11px] font-black uppercase text-black">
           Output
           <select
-            className="bg-[#1a1a1a] border border-[#333] rounded-sm text-[#ddd] font-mono text-[11px] py-[3px] px-1.5"
+            className="border-2 border-black bg-white px-1.5 py-[3px] font-mono text-[11px] font-bold text-black"
             value={selectedOutput || ''}
             onChange={e => {
               midiService.selectOutput(e.target.value || null);
@@ -75,7 +75,7 @@ export function MidiPanel() {
             {outputs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
         </label>
-        {lastCC && <span className="text-[#4a9] text-[10px]">{lastCC}</span>}
+        {lastCC && <span className="border-2 border-black bg-[#f3d85a] px-2 py-0.5 font-mono text-[10px] font-black uppercase text-black">{lastCC}</span>}
       </div>
     </div>
   );

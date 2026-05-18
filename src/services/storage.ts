@@ -1,4 +1,7 @@
 const STORAGE_KEY = 'resonator-state';
+const DEFAULT_MASTER_VOLUME = 0.8;
+const DEFAULT_KEYBOARD_VOLUME = 1;
+const DEFAULT_CHORD_PAD_VOLUME = 1;
 
 export interface StreamSettings {
   filterQ: number;
@@ -12,6 +15,9 @@ interface SavedState {
   activeStreamIds: string[];
   streams: Record<string, StreamSettings>;
   soloId: string | null;
+  masterVolume: number;
+  keyboardVolume: number;
+  chordPadVolume: number;
 }
 
 function load(): SavedState | null {
@@ -29,12 +35,33 @@ function save(state: SavedState): void {
   } catch { /* quota exceeded, etc */ }
 }
 
+function normalizeSavedState(state: Partial<SavedState> | null): SavedState {
+  const savedMasterVolume = state?.masterVolume;
+  const savedKeyboardVolume = state?.keyboardVolume;
+  const savedChordPadVolume = state?.chordPadVolume;
+  return {
+    activeStreamIds: Array.isArray(state?.activeStreamIds) ? state.activeStreamIds : [],
+    streams: state?.streams ?? {},
+    soloId: state?.soloId ?? null,
+    masterVolume: typeof savedMasterVolume === 'number' && Number.isFinite(savedMasterVolume)
+      ? savedMasterVolume
+      : DEFAULT_MASTER_VOLUME,
+    keyboardVolume: typeof savedKeyboardVolume === 'number' && Number.isFinite(savedKeyboardVolume)
+      ? savedKeyboardVolume
+      : DEFAULT_KEYBOARD_VOLUME,
+    chordPadVolume: typeof savedChordPadVolume === 'number' && Number.isFinite(savedChordPadVolume)
+      ? savedChordPadVolume
+      : DEFAULT_CHORD_PAD_VOLUME,
+  };
+}
+
 function getCurrent(): SavedState {
-  return load() ?? { activeStreamIds: [], streams: {}, soloId: null };
+  return normalizeSavedState(load());
 }
 
 export function getSavedState(): SavedState | null {
-  return load();
+  const state = load();
+  return state ? normalizeSavedState(state) : null;
 }
 
 export function saveActiveStreams(ids: string[]): void {
@@ -57,6 +84,36 @@ export function saveSoloId(soloId: string | null): void {
   const state = getCurrent();
   state.soloId = soloId;
   save(state);
+}
+
+export function saveMasterVolume(masterVolume: number): void {
+  const state = getCurrent();
+  state.masterVolume = masterVolume;
+  save(state);
+}
+
+export function getMasterVolume(): number {
+  return getCurrent().masterVolume;
+}
+
+export function saveKeyboardVolume(keyboardVolume: number): void {
+  const state = getCurrent();
+  state.keyboardVolume = keyboardVolume;
+  save(state);
+}
+
+export function getKeyboardVolume(): number {
+  return getCurrent().keyboardVolume;
+}
+
+export function saveChordPadVolume(chordPadVolume: number): void {
+  const state = getCurrent();
+  state.chordPadVolume = chordPadVolume;
+  save(state);
+}
+
+export function getChordPadVolume(): number {
+  return getCurrent().chordPadVolume;
 }
 
 export function removeStreamSettings(id: string): void {

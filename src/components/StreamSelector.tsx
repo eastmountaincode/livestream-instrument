@@ -1,13 +1,15 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import Hls from 'hls.js';
 import { audioEngine } from '../services/AudioEngine';
-import { LIVE_SOURCES, getOrcasoundStreamUrl } from '../services/streams';
+import { fetchAcceptedLiveSources, getOrcasoundStreamUrl } from '../services/streams';
 import type { LiveSource } from '../services/streams';
 import { saveActiveStreams, getSavedState } from '../services/storage';
 
 interface Props {
   onConnected: () => void;
   onActiveChange: (ids: Set<string>) => void;
+  onSourcesChange?: (sources: LiveSource[]) => void;
+  onRemoveSourceReady?: (removeSource: (sourceId: string) => void) => void;
   autoRestore?: boolean;
 }
 
@@ -16,18 +18,105 @@ interface ActiveStream {
 }
 
 const typeIconColors: Record<string, string> = {
-  'hydrophone': 'text-[#4a9eff]',
-  'weather-radio': 'text-[#ffaa33]',
-  'vlf': 'text-[#cc66ff]',
-  'soundscape': 'text-[#66cc88]',
+  'hydrophone': 'text-black',
+  'weather-radio': 'text-black',
+  'vlf': 'text-black',
+  'soundscape': 'text-black',
 };
+const SOURCE_LOAD_RETRIES = 3;
+const SOURCE_LOAD_RETRY_DELAY_MS = 700;
 
-export function StreamSelector({ onConnected, onActiveChange, autoRestore }: Props) {
+function groupSourcesByCategory(sources: LiveSource[]): [string, LiveSource[]][] {
+  const groups = new Map<string, LiveSource[]>();
+  for (const source of sources) {
+    const category = source.category || 'uncategorized';
+    groups.set(category, [...(groups.get(category) ?? []), source]);
+  }
+  return Array.from(groups.entries()).sort(([a], [b]) => a.localeCompare(b));
+}
+
+function formatLocalTime(date: Date, timeZone?: string): string {
+  if (!timeZone) return '';
+
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    }).format(date);
+  } catch {
+    return '';
+  }
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise(resolve => window.setTimeout(resolve, ms));
+}
+
+export function StreamSelector({ onConnected, onActiveChange, onSourcesChange, onRemoveSourceReady, autoRestore }: Props) {
+  const [sources, setSources] = useState<LiveSource[]>([]);
+  const [sourceLoadError, setSourceLoadError] = useState('');
+  const [sourcesReady, setSourcesReady] = useState(false);
+  const [clock, setClock] = useState(() => new Date());
   const [activeIds, setActiveIds] = useState<Set<string>>(new Set());
   const [loadingIds, setLoadingIds] = useState<Set<string>>(new Set());
   const [errors, setErrors] = useState<Map<string, string>>(new Map());
   const activeStreams = useRef<Map<string, ActiveStream>>(new Map());
   const restoredRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSources() {
+      for (let attempt = 1; attempt <= SOURCE_LOAD_RETRIES; attempt++) {
+        try {
+          const result = await fetchAcceptedLiveSources();
+          const shouldRetryDegradedLoad = !result.configured && !result.fromCache && attempt < SOURCE_LOAD_RETRIES;
+
+          if (shouldRetryDegradedLoad) {
+            await wait(SOURCE_LOAD_RETRY_DELAY_MS * attempt);
+            continue;
+          }
+
+          if (cancelled) return;
+          setSources(result.sources);
+          onSourcesChange?.(result.sources);
+          setSourceLoadError(result.configured
+            ? ''
+            : result.fromCache
+              ? 'stream database unavailable, using last saved source list'
+              : 'stream database unavailable, using bundled source list');
+          setSourcesReady(true);
+          return;
+        } catch (error) {
+          if (attempt < SOURCE_LOAD_RETRIES) {
+            await wait(SOURCE_LOAD_RETRY_DELAY_MS * attempt);
+            continue;
+          }
+
+          if (cancelled) return;
+          setSourceLoadError(error instanceof Error ? error.message : 'Failed to load stream database');
+          setSources([]);
+          onSourcesChange?.([]);
+          setSourcesReady(true);
+        }
+      }
+    }
+
+    loadSources();
+    return () => {
+      cancelled = true;
+    };
+  }, [onSourcesChange]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setClock(new Date());
+    }, 30_000);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
 
   useEffect(() => {
     onActiveChange(activeIds);
@@ -49,6 +138,11 @@ export function StreamSelector({ onConnected, onActiveChange, autoRestore }: Pro
       return next;
     });
   }, []);
+
+  useEffect(() => {
+    onRemoveSourceReady?.(disconnect);
+    return () => onRemoveSourceReady?.(() => undefined);
+  }, [disconnect, onRemoveSourceReady]);
 
   const connect = useCallback(async (source: LiveSource) => {
     setLoadingIds(prev => new Set(prev).add(source.id));
@@ -92,13 +186,17 @@ export function StreamSelector({ onConnected, onActiveChange, autoRestore }: Pro
     };
 
     try {
-      if (source.hlsNode) {
-        const hlsUrl = await getOrcasoundStreamUrl(source);
+      if (source.hlsUrl || source.latestTxtUrl || source.hlsNode) {
+        const hlsUrl = source.hlsUrl || await getOrcasoundStreamUrl(source);
 
         if (Hls.isSupported()) {
           const hls = new Hls({
-            liveSyncDurationCount: 3,
-            liveMaxLatencyDurationCount: 6,
+            liveSyncDurationCount: 6,
+            liveMaxLatencyDurationCount: 12,
+            maxBufferLength: 60,
+            backBufferLength: 30,
+            manifestLoadingMaxRetry: 6,
+            fragLoadingMaxRetry: 6,
           });
           activeStreams.current.set(source.id, { hls });
 
@@ -151,15 +249,15 @@ export function StreamSelector({ onConnected, onActiveChange, autoRestore }: Pro
 
   // Auto-reconnect saved streams (AudioContext already resumed by Start button)
   useEffect(() => {
-    if (!autoRestore || restoredRef.current) return;
+    if (!autoRestore || restoredRef.current || !sourcesReady) return;
     restoredRef.current = true;
     const saved = getSavedState();
     if (!saved?.activeStreamIds.length) return;
     for (const id of saved.activeStreamIds) {
-      const source = LIVE_SOURCES.find(s => s.id === id);
+      const source = sources.find(s => s.id === id);
       if (source) connect(source);
     }
-  }, [autoRestore, connect]);
+  }, [autoRestore, connect, sources, sourcesReady]);
 
   const toggle = useCallback((source: LiveSource) => {
     if (activeIds.has(source.id)) {
@@ -175,33 +273,60 @@ export function StreamSelector({ onConnected, onActiveChange, autoRestore }: Pro
     'vlf': '*',
     'soundscape': '◦',
   };
+  const groupedSources = groupSourcesByCategory(sources);
 
   return (
-    <div className="mb-3">
-      <h3 className="text-xs text-[#666] mb-2 font-medium">Live Source</h3>
-      <div className="flex flex-wrap gap-1 mb-1.5">
-        {LIVE_SOURCES.map(source => (
-          <button
-            key={source.id}
-            className={`flex items-center gap-1 px-2 py-1 border rounded font-mono text-[11px] cursor-pointer transition-all duration-100 ${
-              activeIds.has(source.id)
-                ? 'border-[#4a7] bg-[#112211] text-[#8dc]'
-                : 'border-[#2a2a2a] bg-[#161616] text-[#999] hover:border-[#444] hover:text-[#ddd]'
-            }`}
-            onClick={() => toggle(source)}
-            title={`${source.description}\n${source.location}`}
-          >
-            <span className={`font-bold text-[13px] ${typeIconColors[source.type] || ''}`}>{typeIcons[source.type]}</span>
-            <span className="font-medium">{source.name}</span>
-            <span className="text-[#555] text-[10px]">{source.location}</span>
-          </button>
+    <div className="grid gap-3">
+      <div className="flex items-center justify-between gap-3 border-b-2 border-black pb-2">
+        <h3 className="m-0 text-[11px] font-black uppercase tracking-normal text-black">Source Bank</h3>
+        <span className="font-mono text-[10px] font-black uppercase text-black/55">{sources.length} approved</span>
+      </div>
+      <div className="flex flex-col gap-2">
+        {!sourcesReady && (
+          <div className="border-2 border-black bg-white px-2 py-1 text-[11px] font-black uppercase text-black/60">loading approved stream sources...</div>
+        )}
+        {groupedSources.map(([category, categorySources]) => (
+          <div key={category} className="grid gap-1 sm:grid-cols-[118px_minmax(0,1fr)] sm:items-start">
+            <span className="pt-1 text-[10px] font-black uppercase text-black/60">{category}</span>
+            <div className="flex flex-wrap items-center gap-1">
+            {categorySources.map(source => {
+              const localTime = formatLocalTime(clock, source.timeZone);
+
+              return (
+                <button
+                  key={source.id}
+                  className={`flex min-h-9 max-w-full items-center gap-1 border-2 px-2 py-1 font-mono text-[11px] font-bold uppercase transition-colors duration-100 ${
+                    activeIds.has(source.id)
+                      ? 'border-black bg-black text-white'
+                      : 'border-black bg-white text-black hover:bg-black hover:text-white'
+                  }`}
+                  onClick={() => toggle(source)}
+                  title={`${source.description}\n${source.location}${localTime ? `\nLocal time: ${localTime}` : ''}`}
+                >
+                  <span className={`text-[13px] ${activeIds.has(source.id) ? 'text-white' : typeIconColors[source.type] || ''}`}>{typeIcons[source.type] ?? '◦'}</span>
+                  <span className="max-w-[180px] truncate">{source.name}</span>
+                  <span className={activeIds.has(source.id) ? 'hidden text-[10px] text-white/70 md:inline' : 'hidden text-[10px] text-black/50 md:inline'}>{source.location}</span>
+                  {localTime && (
+                    <span className={activeIds.has(source.id) ? 'ml-1 border border-white px-1.5 py-0.5 text-[10px] text-white' : 'ml-1 border border-black px-1.5 py-0.5 text-[10px] text-black'}>
+                      {localTime}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+            </div>
+          </div>
         ))}
       </div>
-      <div className="min-h-[18px]">
-        {loadingIds.size > 0 && <span className="text-[10px] px-2 py-0.5 rounded-sm text-[#fa0] bg-[#332200]">connecting...</span>}
-        {activeIds.size > 0 && <span className="text-[10px] px-2 py-0.5 rounded-sm text-[#4c4] bg-[#113311]">{activeIds.size} source{activeIds.size > 1 ? 's' : ''} live</span>}
+      <div className="flex min-h-[20px] flex-wrap gap-1">
+        {sourceLoadError && <span className="border-2 border-black bg-[#f3d85a] px-2 py-0.5 text-[10px] font-black uppercase text-black">{sourceLoadError}</span>}
+        {sourcesReady && !sourceLoadError && sources.length === 0 && (
+          <span className="border-2 border-black bg-[#f3d85a] px-2 py-0.5 text-[10px] font-black uppercase text-black">no approved stream sources loaded</span>
+        )}
+        {loadingIds.size > 0 && <span className="border-2 border-black bg-[#f3d85a] px-2 py-0.5 text-[10px] font-black uppercase text-black">connecting...</span>}
+        {activeIds.size > 0 && <span className="border-2 border-black bg-black px-2 py-0.5 text-[10px] font-black uppercase text-white">{activeIds.size} source{activeIds.size > 1 ? 's' : ''} live</span>}
         {Array.from(errors.entries()).map(([id, msg]) => (
-          <span key={id} className="text-[10px] px-2 py-0.5 rounded-sm text-[#f44] bg-[#331111]">{msg}</span>
+          <span key={id} className="border-2 border-black bg-[#f18a7a] px-2 py-0.5 text-[10px] font-black uppercase text-black">{msg}</span>
         ))}
       </div>
     </div>

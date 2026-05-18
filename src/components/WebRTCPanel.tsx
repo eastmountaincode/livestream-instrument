@@ -51,40 +51,40 @@ export function WebRTCPanel() {
 
   const statusBadgeClass = (s: string) => {
     switch (s) {
-      case 'connected': return 'text-[#4c4] bg-[#113311]';
-      case 'connecting': return 'text-[#fa0] bg-[#332200]';
-      default: return 'text-[#888] bg-[#222]';
+      case 'connected': return 'bg-black text-white';
+      case 'connecting': return 'bg-[#f3d85a] text-black';
+      default: return 'bg-white text-black';
     }
   };
 
   return (
-    <div className="bg-[#141414] rounded-md p-3 mb-2">
-      <h3 className="text-[13px] font-semibold mb-2 text-[#aaa]">WebRTC Peer Sync</h3>
-      <div className="mb-2 text-xs">
-        Status: <span className={`px-2 py-0.5 rounded-sm text-[11px] font-semibold ${statusBadgeClass(state)}`}>{state}</span>
+    <div className="border-2 border-black bg-white p-3">
+      <h3 className="mb-2 text-[11px] font-black uppercase text-black">WebRTC Peer Sync</h3>
+      <div className="mb-3 text-xs font-black uppercase text-black">
+        Status: <span className={`border-2 border-black px-2 py-0.5 text-[11px] font-black ${statusBadgeClass(state)}`}>{state}</span>
       </div>
 
       {state === 'disconnected' && (
         <div className="flex flex-col gap-3">
           <div>
-            <h4 className="text-[11px] text-[#888] mb-1.5 font-medium">Create Session (Leader)</h4>
+            <h4 className="mb-1.5 text-[11px] font-black uppercase text-black/60">Create Session (Leader)</h4>
             <button
-              className="py-[5px] px-3.5 border border-[#333] rounded-sm bg-[#222] text-[#aaa] cursor-pointer font-mono text-[11px] mr-1.5 hover:bg-[#2a2a2a] hover:text-[#ddd]"
+              className="mr-1.5 border-2 border-black bg-white px-3.5 py-[5px] font-mono text-[11px] font-black uppercase text-black hover:bg-black hover:text-white"
               onClick={handleCreateOffer}
             >Generate Offer</button>
           </div>
 
           <div>
-            <h4 className="text-[11px] text-[#888] mb-1.5 font-medium">Join Session (Follower)</h4>
+            <h4 className="mb-1.5 text-[11px] font-black uppercase text-black/60">Join Session (Follower)</h4>
             <textarea
-              className="w-full bg-[#1a1a1a] border border-[#333] rounded-sm text-[#ddd] font-mono text-[10px] p-1.5 resize-y mb-1"
+              className="mb-1 w-full resize-y border-2 border-black bg-white p-1.5 font-mono text-[10px] text-black"
               placeholder="Paste offer here..."
               value={offerText}
               onChange={e => setOfferText(e.target.value)}
               rows={3}
             />
             <button
-              className="py-[5px] px-3.5 border border-[#333] rounded-sm bg-[#222] text-[#aaa] cursor-pointer font-mono text-[11px] mr-1.5 hover:bg-[#2a2a2a] hover:text-[#ddd]"
+              className="mr-1.5 border-2 border-black bg-white px-3.5 py-[5px] font-mono text-[11px] font-black uppercase text-black hover:bg-black hover:text-white disabled:opacity-30"
               onClick={handleAcceptOffer}
               disabled={!offerText}
             >Join</button>
@@ -95,9 +95,9 @@ export function WebRTCPanel() {
       {state === 'connecting' && localSignal && (
         <div className="flex flex-col gap-3">
           <div>
-            <h4 className="text-[11px] text-[#888] mb-1.5 font-medium">Your Signal (copy & send to peer)</h4>
+            <h4 className="mb-1.5 text-[11px] font-black uppercase text-black/60">Your Signal (copy & send to peer)</h4>
             <textarea
-              className="w-full bg-[#1a1a1a] border border-[#333] rounded-sm text-[#ddd] font-mono text-[10px] p-1.5 resize-y mb-1"
+              className="mb-1 w-full resize-y border-2 border-black bg-white p-1.5 font-mono text-[10px] text-black"
               readOnly
               value={localSignal}
               rows={3}
@@ -107,16 +107,16 @@ export function WebRTCPanel() {
 
           {role === 'leader' && (
             <div>
-              <h4 className="text-[11px] text-[#888] mb-1.5 font-medium">Paste Peer's Answer</h4>
+              <h4 className="mb-1.5 text-[11px] font-black uppercase text-black/60">Paste Peer's Answer</h4>
               <textarea
-                className="w-full bg-[#1a1a1a] border border-[#333] rounded-sm text-[#ddd] font-mono text-[10px] p-1.5 resize-y mb-1"
+                className="mb-1 w-full resize-y border-2 border-black bg-white p-1.5 font-mono text-[10px] text-black"
                 placeholder="Paste answer here..."
                 value={answerText}
                 onChange={e => setAnswerText(e.target.value)}
                 rows={3}
               />
               <button
-                className="py-[5px] px-3.5 border border-[#333] rounded-sm bg-[#222] text-[#aaa] cursor-pointer font-mono text-[11px] mr-1.5 hover:bg-[#2a2a2a] hover:text-[#ddd]"
+                className="mr-1.5 border-2 border-black bg-white px-3.5 py-[5px] font-mono text-[11px] font-black uppercase text-black hover:bg-black hover:text-white disabled:opacity-30"
                 onClick={handleAcceptAnswer}
                 disabled={!answerText}
               >Connect</button>
@@ -127,28 +127,28 @@ export function WebRTCPanel() {
 
       {state === 'connected' && (
         <div>
-          <p className="mb-2 text-xs">Connected as <strong>{role}</strong></p>
+          <p className="mb-2 text-xs font-black uppercase text-black">Connected as <strong>{role}</strong></p>
           {role === 'leader' && (
             <div>
               <button
-                className="py-[5px] px-3.5 border border-[#333] rounded-sm bg-[#222] text-[#aaa] cursor-pointer font-mono text-[11px] mr-1.5 hover:bg-[#2a2a2a] hover:text-[#ddd]"
+                className="mr-1.5 border-2 border-black bg-white px-3.5 py-[5px] font-mono text-[11px] font-black uppercase text-black hover:bg-black hover:text-white"
                 onClick={handleStartSync}
               >Start Clock Sync</button>
               <button
-                className="py-[5px] px-3.5 border border-[#333] rounded-sm bg-[#222] text-[#aaa] cursor-pointer font-mono text-[11px] mr-1.5 hover:bg-[#2a2a2a] hover:text-[#ddd]"
+                className="mr-1.5 border-2 border-black bg-white px-3.5 py-[5px] font-mono text-[11px] font-black uppercase text-black hover:bg-black hover:text-white"
                 onClick={handleStopSync}
               >Stop Clock</button>
             </div>
           )}
           <button
-            className="py-[5px] px-3.5 border border-[#533] rounded-sm bg-[#222] text-[#c66] cursor-pointer font-mono text-[11px] mr-1.5 hover:bg-[#2a2a2a] hover:text-[#ddd]"
+            className="mr-1.5 border-2 border-black bg-white px-3.5 py-[5px] font-mono text-[11px] font-black uppercase text-black hover:bg-black hover:text-white"
             onClick={() => webrtcService.disconnect()}
           >
             Disconnect
           </button>
           {messages.length > 0 && (
-            <div className="mt-2 max-h-[100px] overflow-y-auto text-[10px]">
-              {messages.map((m, i) => <div key={i} className="text-[#666] py-px border-b border-[#1a1a1a]">{m}</div>)}
+            <div className="mt-2 max-h-[100px] overflow-y-auto border-2 border-black text-[10px]">
+              {messages.map((m, i) => <div key={i} className="border-b border-black px-1 py-px font-mono text-black/65 last:border-b-0">{m}</div>)}
             </div>
           )}
         </div>

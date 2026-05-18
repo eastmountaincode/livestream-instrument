@@ -6,9 +6,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "r2:bucket:create": "wrangler r2 bucket create resonator-stream-review",
+    "r2:bucket:list": "wrangler r2 bucket list",
+    "r2:seed": "curl -s http://localhost:3000/api/stream-candidates | node -e \"let data='';process.stdin.on('data',d=>data+=d);process.stdin.on('end',()=>process.stdout.write(JSON.stringify(JSON.parse(data).candidates,null,2)))\" | wrangler r2 object put resonator-stream-review/stream-candidates.json --pipe --content-type application/json"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1037.0",
     "@tailwindcss/postcss": "^4.2.2",
     "hls.js": "^1.6.15",
     "next": "^16.2.2",
@@ -27,6 +31,7 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "globals": "^17.4.0",
     "typescript": "~5.9.3",
-    "typescript-eslint": "^8.57.0"
+    "typescript-eslint": "^8.57.0",
+    "wrangler": "^4.85.0"
   }
 }

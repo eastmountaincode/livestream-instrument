@@ -26,6 +26,15 @@ interface Voice {
   active: boolean;
 }
 
+interface NoteSourceState {
+  count: number;
+  velocity: number;
+}
+
+interface ActiveNoteState {
+  sources: Map<string, NoteSourceState>;
+}
+
 function noteToFreq(note: number): number {
   return 440 * Math.pow(2, (note - 69) / 12);
 }
@@ -33,6 +42,7 @@ function noteToFreq(note: number): number {
 interface StreamChannel {
   source: MediaElementAudioSourceNode;
   streamGain: GainNode;
+  analyser: AnalyserNode;
   panner: StereoPannerNode;
   audioElement: HTMLAudioElement;
   voices: Voice[];
@@ -51,6 +61,7 @@ export class AudioEngine {
   analyser: AnalyserNode;
 
   private channels: Map<string, StreamChannel> = new Map();
+  private activeNotes: Map<number, ActiveNoteState> = new Map();
   private externalClock = false;
 
   constructor() {
@@ -89,9 +100,13 @@ export class AudioEngine {
     merger.connect(monoOut);
 
     const streamGain = this.ctx.createGain();
+    const analyser = this.ctx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.85;
     const panner = this.ctx.createStereoPanner();
     panner.pan.value = 0;
-    streamGain.connect(panner);
+    streamGain.connect(analyser);
+    analyser.connect(panner);
     panner.connect(this.masterGain);
 
     // Build voice pool for this stream
@@ -120,6 +135,7 @@ export class AudioEngine {
     this.channels.set(id, {
       source,
       streamGain,
+      analyser,
       panner,
       audioElement,
       voices,
@@ -131,13 +147,12 @@ export class AudioEngine {
       pan: 0,
     });
 
-    // Activate any currently held notes on the new stream
-    for (const [, ch] of this.channels) {
-      if (ch === this.channels.get(id)) continue;
-      for (const [note] of ch.activeVoices) {
-        this.noteOnForChannel(this.channels.get(id)!, note, 127);
+    // Activate any currently held notes on the new stream.
+    const newChannel = this.channels.get(id);
+    if (newChannel) {
+      for (const note of this.activeNotes.keys()) {
+        this.noteOnForChannel(newChannel, note, this.getEffectiveVelocity(note));
       }
-      break; // only need one existing channel to know which notes are held
     }
   }
 
@@ -157,6 +172,7 @@ export class AudioEngine {
       }
       try { ch.source.disconnect(); } catch { /* ok */ }
       try { ch.streamGain.disconnect(); } catch { /* ok */ }
+      try { ch.analyser.disconnect(); } catch { /* ok */ }
       try { ch.panner.disconnect(); } catch { /* ok */ }
       ch.audioElement.pause();
       ch.audioElement.src = '';
@@ -181,6 +197,36 @@ export class AudioEngine {
 
   // --- Note on/off (across all channels) ---
 
+  private velocityToGain(velocity: number): number {
+    return (Math.max(0, velocity) / 127) * VOICE_GAIN_BOOST;
+  }
+
+  private getEffectiveVelocity(note: number): number {
+    const noteState = this.activeNotes.get(note);
+    if (!noteState) return 0;
+
+    let maxVelocity = 0;
+    for (const sourceState of noteState.sources.values()) {
+      if (sourceState.velocity > maxVelocity) {
+        maxVelocity = sourceState.velocity;
+      }
+    }
+
+    return maxVelocity;
+  }
+
+  private refreshNoteGain(note: number) {
+    const now = this.ctx.currentTime;
+    const nextGain = this.velocityToGain(this.getEffectiveVelocity(note));
+
+    for (const [, ch] of this.channels) {
+      const voice = ch.activeVoices.get(note);
+      if (!voice) continue;
+      voice.gain.gain.cancelScheduledValues(now);
+      voice.gain.gain.setTargetAtTime(nextGain, now, ATTACK);
+    }
+  }
+
   private noteOnForChannel(ch: StreamChannel, note: number, velocity: number) {
     if (ch.activeVoices.has(note)) return;
 
@@ -199,7 +245,7 @@ export class AudioEngine {
     const shiftedNote = note + ch.octaveShift * 12;
     const freq = noteToFreq(shiftedNote);
     const now = this.ctx.currentTime;
-    const velGain = (velocity / 127) * VOICE_GAIN_BOOST;
+    const velGain = this.velocityToGain(velocity);
 
     voice.note = note;
     voice.active = true;
@@ -211,8 +257,27 @@ export class AudioEngine {
     ch.activeVoices.set(note, voice);
   }
 
-  noteOn(note: number, velocity: number = 127) {
+  noteOn(note: number, velocity: number = 127, source: string = 'default') {
     if (!this.isStreamConnected()) return;
+
+    const noteState = this.activeNotes.get(note) ?? { sources: new Map<string, NoteSourceState>() };
+    const sourceState = noteState.sources.get(source);
+
+    if (sourceState) {
+      sourceState.count += 1;
+      sourceState.velocity = Math.max(sourceState.velocity, velocity);
+    } else {
+      noteState.sources.set(source, { count: 1, velocity });
+    }
+
+    const wasActive = this.activeNotes.has(note);
+    this.activeNotes.set(note, noteState);
+
+    if (wasActive) {
+      this.refreshNoteGain(note);
+      return;
+    }
+
     for (const [, ch] of this.channels) {
       this.noteOnForChannel(ch, note, velocity);
     }
@@ -230,13 +295,56 @@ export class AudioEngine {
     ch.activeVoices.delete(note);
   }
 
-  noteOff(note: number) {
+  noteOff(note: number, source: string = 'default') {
+    const noteState = this.activeNotes.get(note);
+    const sourceState = noteState?.sources.get(source);
+    if (!noteState || !sourceState) return;
+
+    if (sourceState.count > 1) {
+      sourceState.count -= 1;
+      return;
+    }
+
+    noteState.sources.delete(source);
+    if (noteState.sources.size > 0) {
+      this.refreshNoteGain(note);
+      return;
+    }
+
+    this.activeNotes.delete(note);
     for (const [, ch] of this.channels) {
       this.noteOffForChannel(ch, note);
     }
   }
 
-  allNotesOff() {
+  updateNoteSourceVelocity(note: number, velocity: number, source: string = 'default') {
+    const noteState = this.activeNotes.get(note);
+    const sourceState = noteState?.sources.get(source);
+    if (!noteState || !sourceState) return;
+
+    sourceState.velocity = velocity;
+    this.refreshNoteGain(note);
+  }
+
+  allNotesOff(source?: string) {
+    if (source) {
+      for (const [note, noteState] of Array.from(this.activeNotes.entries())) {
+        if (!noteState.sources.has(source)) continue;
+
+        noteState.sources.delete(source);
+        if (noteState.sources.size === 0) {
+          this.activeNotes.delete(note);
+          for (const [, ch] of this.channels) {
+            this.noteOffForChannel(ch, note);
+          }
+        } else {
+          this.refreshNoteGain(note);
+        }
+      }
+      return;
+    }
+
+    this.activeNotes.clear();
     const now = this.ctx.currentTime;
     for (const [, ch] of this.channels) {
       for (const voice of ch.voices) {
@@ -318,6 +426,10 @@ export class AudioEngine {
     return this.channels.get(id)?.pan ?? 0;
   }
 
+  getStreamAnalyser(id: string): AnalyserNode | null {
+    return this.channels.get(id)?.analyser ?? null;
+  }
+
   setStreamOctave(id: string, shift: number) {
     const ch = this.channels.get(id);
     if (!ch) return;
@@ -349,13 +461,16 @@ export class AudioEngine {
   }
 
   setMasterVolume(vol: number) {
-    this.masterGain.gain.setTargetAtTime(vol, this.ctx.currentTime, 0.01);
+    const safeVolume = Number.isFinite(vol) ? Math.max(0, vol) : 0.8;
+    this.masterGain.gain.setTargetAtTime(safeVolume, this.ctx.currentTime, 0.01);
+  }
+
+  getMasterVolume(): number {
+    return this.masterGain.gain.value;
   }
 
   getActiveNotes(): number[] {
-    // Collect from first channel (all channels have the same active notes)
-    const first = this.channels.values().next().value;
-    return first ? Array.from(first.activeVoices.keys()) : [];
+    return Array.from(this.activeNotes.keys());
   }
 
   setExternalClock(enabled: boolean) {
