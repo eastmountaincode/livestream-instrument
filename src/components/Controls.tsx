@@ -169,10 +169,10 @@ function StreamControls({
 
   return (
     <div className={`grid gap-2 border-b-2 border-black py-3 last:border-b-0 ${muted ? '[&_.sc-name]:opacity-40 [&_.sc-label]:opacity-40 [&_.sc-value]:opacity-40' : ''}`}>
-      <div className="flex items-baseline gap-2 min-w-0">
+      <div className="flex items-start gap-2 min-w-0">
         <span className="w-7 min-w-7 border-2 border-black bg-white px-1 py-0.5 text-center font-mono text-[10px] font-black text-black">T{index + 1}</span>
-        <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-1">
-          <span className="sc-name min-w-0 whitespace-normal break-words text-[12px] font-black uppercase leading-snug text-black">
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="sc-name min-w-0 basis-full whitespace-normal break-words text-[12px] font-black uppercase leading-snug text-black sm:basis-auto">
             {source?.name ?? id}
           </span>
           {source?.location && (

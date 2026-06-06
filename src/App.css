@@ -6,8 +6,8 @@
   }
 
   body {
-    background: #f2f0e8;
-    color: #111;
+    background: #ebe8de;
+    color: #171717;
     font-family: Helvetica, Arial, sans-serif;
     font-size: 13px;
     user-select: none;
@@ -40,8 +40,8 @@ input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
   height: 12px;
-  background: #fff;
-  border: 2px solid #111;
+  background: #fbfaf6;
+  border: 1px solid #242424;
   border-radius: 0;
   outline: none;
 }
@@ -52,27 +52,60 @@ input[type="range"]::-webkit-slider-thumb {
   width: 18px;
   height: 28px;
   border-radius: 0;
-  background: #111;
+  background: #242424;
   cursor: pointer;
-  border: 2px solid #111;
+  border: 1px solid #242424;
 }
 
 input[type="range"]::-webkit-slider-thumb:hover {
-  background: #fff;
+  background: #fbfaf6;
 }
 
 input[type="range"]::-moz-range-thumb {
   width: 18px;
   height: 28px;
   border-radius: 0;
-  background: #111;
+  background: #242424;
   cursor: pointer;
-  border: 2px solid #111;
+  border: 1px solid #242424;
 }
 
 input[type="range"]::-moz-range-track {
   height: 12px;
-  background: #fff;
-  border: 2px solid #111;
+  background: #fbfaf6;
+  border: 1px solid #242424;
   border-radius: 0;
+}
+
+.instrument-ui {
+  --ui-ink: #242424;
+  --ui-paper: #fbfaf6;
+  --ui-surface: #f3f1ea;
+  --ui-muted: #68645c;
+  --ui-accent: #d8cfb7;
+}
+
+.instrument-ui .border-2.border-black {
+  border-color: var(--ui-ink);
+  border-width: 1px;
+}
+
+.instrument-ui .border-black {
+  border-color: var(--ui-ink);
+}
+
+.instrument-ui .bg-white {
+  background-color: var(--ui-paper);
+}
+
+.instrument-ui .bg-black {
+  background-color: var(--ui-ink);
+}
+
+.instrument-ui .font-black {
+  font-weight: 650;
+}
+
+.instrument-ui .uppercase {
+  letter-spacing: 0.025em;
 }

@@ -266,38 +266,35 @@ export function StreamSelector({ onConnected, onActiveChange, onSourcesChange, o
   const groupedSources = groupSourcesByCategory(sources);
 
   return (
-    <div className="grid gap-3">
-      <div className="flex items-center justify-between gap-3 border-b-2 border-black pb-2">
-        <h3 className="m-0 text-[11px] font-black uppercase tracking-normal text-black">Source Bank</h3>
-        <span className="font-mono text-[10px] font-black uppercase text-black/55">{sources.length} approved</span>
-      </div>
-      <div className="flex flex-col gap-2">
+    <div className="grid gap-2">
+      <div className="max-h-[430px] overflow-y-auto pr-1">
+        <div className="flex flex-col gap-2">
         {!sourcesReady && (
-          <div className="border-2 border-black bg-white px-2 py-1 text-[11px] font-black uppercase text-black/60">loading approved stream sources...</div>
+          <div className="border border-[#242424] bg-[#fbfaf6] px-2 py-1 text-[11px] font-semibold uppercase text-[#68645c]">loading approved stream sources...</div>
         )}
         {groupedSources.map(([category, categorySources]) => (
-          <div key={category} className="grid gap-1 sm:grid-cols-[118px_minmax(0,1fr)] sm:items-start">
-            <span className="pt-1 text-[10px] font-black uppercase text-black/60">{category}</span>
-            <div className="flex flex-wrap items-center gap-1">
+          <div key={category} className="grid gap-1">
+            <span className="text-[10px] font-semibold uppercase text-[#68645c]">{category}</span>
+            <div className="grid gap-1">
             {categorySources.map(source => {
               const localTime = formatLocalTime(clock, source.timeZone);
+              const active = activeIds.has(source.id);
 
               return (
                 <button
                   key={source.id}
-                  className={`flex min-h-9 max-w-full items-center gap-1 border-2 px-2 py-1 font-mono text-[11px] font-bold uppercase transition-colors duration-100 ${
-                    activeIds.has(source.id)
-                      ? 'border-black bg-black text-white'
-                      : 'border-black bg-white text-black hover:bg-black hover:text-white'
+                  className={`grid min-h-8 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1 border px-2 py-1 text-left font-mono text-[10px] font-semibold uppercase transition-colors duration-100 ${
+                    active
+                      ? 'border-[#242424] bg-[#242424] text-[#fbfaf6]'
+                      : 'border-[#242424] bg-[#fbfaf6] text-[#171717] hover:bg-[#eeece3]'
                   }`}
                   onClick={() => toggle(source)}
                   title={`${source.description}\n${source.location}${localTime ? `\nLocal time: ${localTime}` : ''}`}
                 >
-                  <span className={`text-[13px] ${activeIds.has(source.id) ? 'text-white' : typeIconColors[source.type] || ''}`}>{typeIcons[source.type] ?? '◦'}</span>
-                  <span className="max-w-[180px] truncate">{source.name}</span>
-                  <span className={activeIds.has(source.id) ? 'hidden text-[10px] text-white/70 md:inline' : 'hidden text-[10px] text-black/50 md:inline'}>{source.location}</span>
+                  <span className={`shrink-0 text-[12px] ${active ? 'text-[#fbfaf6]' : typeIconColors[source.type] || ''}`}>{typeIcons[source.type] ?? '◦'}</span>
+                  <span className="min-w-0 truncate leading-tight">{source.name}</span>
                   {localTime && (
-                    <span className={activeIds.has(source.id) ? 'ml-1 border border-white px-1.5 py-0.5 text-[10px] text-white' : 'ml-1 border border-black px-1.5 py-0.5 text-[10px] text-black'}>
+                    <span className={active ? 'shrink-0 border border-[#fbfaf6] px-1.5 py-0.5 text-[9px] text-[#fbfaf6]' : 'shrink-0 border border-[#242424] px-1.5 py-0.5 text-[9px] text-[#171717]'}>
                       {localTime}
                     </span>
                   )}
@@ -307,16 +304,17 @@ export function StreamSelector({ onConnected, onActiveChange, onSourcesChange, o
             </div>
           </div>
         ))}
+        </div>
       </div>
-      <div className="flex min-h-[20px] flex-wrap gap-1">
-        {sourceLoadError && <span className="border-2 border-black bg-[#f3d85a] px-2 py-0.5 text-[10px] font-black uppercase text-black">{sourceLoadError}</span>}
+      <div className="flex min-h-[28px] flex-wrap gap-1 border-t border-[#242424] pt-2">
+        {sourceLoadError && <span className="border border-[#242424] bg-[#d8cfb7] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#171717]">{sourceLoadError}</span>}
         {sourcesReady && !sourceLoadError && sources.length === 0 && (
-          <span className="border-2 border-black bg-[#f3d85a] px-2 py-0.5 text-[10px] font-black uppercase text-black">no approved stream sources loaded</span>
+          <span className="border border-[#242424] bg-[#d8cfb7] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#171717]">no approved stream sources loaded</span>
         )}
-        {loadingIds.size > 0 && <span className="border-2 border-black bg-[#f3d85a] px-2 py-0.5 text-[10px] font-black uppercase text-black">connecting...</span>}
-        {activeIds.size > 0 && <span className="border-2 border-black bg-black px-2 py-0.5 text-[10px] font-black uppercase text-white">{activeIds.size} source{activeIds.size > 1 ? 's' : ''} live</span>}
+        {loadingIds.size > 0 && <span className="border border-[#242424] bg-[#d8cfb7] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#171717]">connecting...</span>}
+        {activeIds.size > 0 && <span className="border border-[#242424] bg-[#242424] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#fbfaf6]">{activeIds.size} source{activeIds.size > 1 ? 's' : ''} live</span>}
         {Array.from(errors.entries()).map(([id, msg]) => (
-          <span key={id} className="border-2 border-black bg-[#f18a7a] px-2 py-0.5 text-[10px] font-black uppercase text-black">{msg}</span>
+          <span key={id} className="border border-[#242424] bg-[#d6a19a] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#171717]">{msg}</span>
         ))}
       </div>
     </div>
