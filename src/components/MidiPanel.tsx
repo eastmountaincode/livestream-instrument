@@ -18,7 +18,7 @@ export function MidiPanel() {
 
     const unsub = midiService.onChange(() => refreshDevices());
     const unsubCC = midiService.onCC((cc, val) => {
-      setLastCC(`cc${cc} = ${val}`);
+      setLastCC(`CC${cc} = ${val}`);
     });
 
     return () => { unsub(); unsubCC(); };

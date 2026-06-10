@@ -32,6 +32,8 @@ const CHORD_TYPES: Record<string, { label: string; intervals: number[]; short: s
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const ROOT_NOTES = NOTE_NAMES.map((name, i) => ({ name, semitone: i }));
+const DEFAULT_ROOT = 5; // F
+const DEFAULT_TYPE = 'min11';
 
 // Common chord type groups for the UI
 const CHORD_GROUPS: { label: string; types: string[] }[] = [
@@ -44,16 +46,18 @@ const CHORD_GROUPS: { label: string; types: string[] }[] = [
 interface Props {
   streamConnected: boolean;
   inputVolume: number;
+  autoPlayDefaultChord?: boolean;
 }
 
-export function ChordPad({ streamConnected, inputVolume }: Props) {
+export function ChordPad({ streamConnected, inputVolume, autoPlayDefaultChord = false }: Props) {
   const octave = 3; // Base octave 3 (C3 = MIDI 48)
-  const [selectedRoot, setSelectedRoot] = useState(0); // C
-  const [selectedType, setSelectedType] = useState('maj');
+  const [selectedRoot, setSelectedRoot] = useState(DEFAULT_ROOT);
+  const [selectedType, setSelectedType] = useState(DEFAULT_TYPE);
   const [latched, setLatched] = useState(false);
   const [activeChordNotes, setActiveChordNotes] = useState<number[]>([]);
   const [inversion, setInversion] = useState(0);
   const prevNotes = useRef<number[]>([]);
+  const defaultChordPlayedRef = useRef(false);
 
   // Build chord notes from root + type + octave + inversion
   const buildChord = useCallback((root: number, type: string, oct: number, inv: number): number[] => {
@@ -117,6 +121,13 @@ export function ChordPad({ streamConnected, inputVolume }: Props) {
     }
   }, [selectedRoot, selectedType, octave, inversion, buildChord, playChord]);
 
+  useEffect(() => {
+    if (!autoPlayDefaultChord || !streamConnected || defaultChordPlayedRef.current) return;
+    defaultChordPlayedRef.current = true;
+    const notes = buildChord(DEFAULT_ROOT, DEFAULT_TYPE, octave, 0);
+    playChord(notes);
+  }, [autoPlayDefaultChord, buildChord, octave, playChord, streamConnected]);
+
   const handleChordTrigger = (root: number, type: string) => {
     setSelectedRoot(root);
     setSelectedType(type);
@@ -142,7 +153,7 @@ export function ChordPad({ streamConnected, inputVolume }: Props) {
       <div className="flex flex-wrap items-center gap-3 border-b-2 border-black pb-2">
         <h3 className="m-0 text-[11px] font-black uppercase text-black">Chord Memory</h3>
         <div className="min-w-[68px] border-2 border-black bg-white px-2 py-1 text-center font-mono text-base font-black text-black">
-          {activeChordNotes.length > 0 ? chordLabel : '---'}
+          {chordLabel}
         </div>
         <button
           className={`border-2 px-3 py-1 font-mono text-[10px] font-black uppercase ${
@@ -152,7 +163,7 @@ export function ChordPad({ streamConnected, inputVolume }: Props) {
           }`}
           onClick={handleLatchToggle}
         >
-          {latched ? 'LATCH ON' : 'LATCH OFF'}
+          {latched ? 'Latch On' : 'Latch Off'}
         </button>
         <div className="flex items-center gap-1 text-[11px] font-black uppercase text-black">
           <button

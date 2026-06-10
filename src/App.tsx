@@ -7,12 +7,30 @@ import { Visualizer } from './components/Visualizer';
 import { Controls } from './components/Controls';
 import { MidiPanel } from './components/MidiPanel';
 import { WebRTCPanel } from './components/WebRTCPanel';
+import { SettingsPanel } from './components/SettingsPanel';
 import { midiService } from './services/MidiService';
 import { audioEngine } from './services/AudioEngine';
 import { getSavedState, getKeyboardVolume, getChordPadVolume } from './services/storage';
+import type { StreamSettings } from './services/storage';
 import type { LiveSource } from './services/streams';
 
-type PanelKey = 'sources' | 'mixer' | 'keyboard' | 'chords' | 'io';
+type PanelKey = 'sources' | 'mixer' | 'keyboard' | 'chords' | 'io' | 'settings';
+
+const DEFAULT_DEMO_SOURCE_IDS = ['locus-seoul-gusan', 'locus-jasper-ridge'];
+const DEFAULT_DEMO_STREAM_SETTINGS: Record<string, Partial<StreamSettings>> = {
+  'locus-seoul-gusan': {
+    filterQ: 46,
+    volume: 14.87,
+    pan: -0.34,
+    octaveShift: 0,
+  },
+  'locus-jasper-ridge': {
+    filterQ: 65,
+    volume: 11.53,
+    pan: 0.34,
+    octaveShift: 0,
+  },
+};
 
 interface PanelProps {
   title: string;
@@ -28,7 +46,7 @@ function Panel({ title, label, open, onToggle, children, meta }: PanelProps) {
     <section className="border border-[#242424] bg-[#fbfaf6]">
       <button
         type="button"
-        className="flex w-full items-center justify-between gap-3 border-b border-[#242424] bg-[#eeece3] px-3 py-2 text-left text-[11px] font-semibold uppercase text-[#171717] transition-colors hover:bg-[#242424] hover:text-[#fbfaf6]"
+        className="flex w-full items-center justify-between gap-3 border-b border-[#242424] bg-[#eeece3] px-3 py-2 text-left text-[11px] font-semibold uppercase text-[#171717] hover:bg-[#242424] hover:text-[#fbfaf6]"
         onClick={onToggle}
         aria-expanded={open}
       >
@@ -38,7 +56,7 @@ function Panel({ title, label, open, onToggle, children, meta }: PanelProps) {
         </span>
         <span className="flex shrink-0 items-center gap-2 font-mono text-[10px] font-semibold">
           {meta}
-          <span>{open ? 'CLOSE' : 'OPEN'}</span>
+          <span>{open ? 'Close' : 'Open'}</span>
         </span>
       </button>
       {open && <div className="p-3">{children}</div>}
@@ -47,6 +65,7 @@ function Panel({ title, label, open, onToggle, children, meta }: PanelProps) {
 }
 
 function App() {
+  const savedStateOnLoadRef = useRef(getSavedState());
   const [started, setStarted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [streamConnected, setStreamConnected] = useState(false);
@@ -55,15 +74,17 @@ function App() {
     sources: true,
     mixer: true,
     keyboard: true,
-    chords: false,
+    chords: true,
     io: false,
+    settings: false,
   });
   const [keyboardVolume, setKeyboardVolume] = useState(() => getKeyboardVolume());
   const [chordPadVolume, setChordPadVolume] = useState(() => getChordPadVolume());
   const [availableSources, setAvailableSources] = useState<LiveSource[]>([]);
   const removeSourceRef = useRef<((sourceId: string) => void) | null>(null);
 
-  const hasSavedStreams = getSavedState()?.activeStreamIds?.length ?? 0;
+  const hasSavedStreams = savedStateOnLoadRef.current?.activeStreamIds?.length ?? 0;
+  const shouldStartDemo = hasSavedStreams === 0;
 
   useEffect(() => {
     midiService.init();
@@ -96,15 +117,14 @@ function App() {
     return (
       <div className="instrument-ui flex min-h-screen flex-col items-center justify-center gap-6 bg-[#ebe8de] px-4 text-[#171717]">
         <div className="border border-[#242424] bg-[#fbfaf6] px-8 py-7 text-center">
-          <h1 className="mb-2 text-4xl font-semibold uppercase leading-none">Resonator</h1>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#66635d]">live-source instrument</p>
+          <h1 className="brand-title text-4xl leading-none">Cicada</h1>
         </div>
         <button
           onClick={handleStart}
           disabled={loading}
-          className="border border-[#242424] bg-[#fbfaf6] px-8 py-3 text-sm font-semibold uppercase text-[#171717] transition-colors hover:bg-[#242424] hover:text-[#fbfaf6] disabled:cursor-wait disabled:opacity-50"
+          className="border border-[#242424] bg-[#fbfaf6] px-8 py-3 text-sm font-semibold uppercase text-[#171717] hover:bg-[#242424] hover:text-[#fbfaf6] disabled:cursor-wait disabled:opacity-50"
         >
-          {loading ? 'connecting...' : hasSavedStreams ? 'Resume Session' : 'Start'}
+          {loading ? 'Connecting...' : hasSavedStreams ? 'Resume Session' : 'Start'}
         </button>
         {hasSavedStreams > 0 && !loading && (
           <p className="text-[11px] font-semibold uppercase text-[#66635d]">{hasSavedStreams} saved source{hasSavedStreams > 1 ? 's' : ''} will reconnect</p>
@@ -120,12 +140,11 @@ function App() {
       <main className="mx-auto flex max-w-[1120px] flex-col gap-3 px-4 py-4">
         <header className="grid gap-3 border border-[#242424] bg-[#fbfaf6] p-3 md:grid-cols-[1fr_auto] md:items-end">
           <div>
-            <h1 className="text-3xl font-semibold uppercase leading-none tracking-normal text-[#171717] md:text-5xl">Resonator</h1>
-            <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[#66635d]">live-source resonant instrument</p>
+            <h1 className="brand-title text-3xl leading-none text-[#171717] md:text-5xl">Cicada</h1>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase">
-            <span className="border border-[#242424] px-2 py-1">{activeSourceIds.size} live</span>
-            <span className="border border-[#242424] px-2 py-1">{availableSources.length} sources</span>
+            <span className="border border-[#242424] px-2 py-1">{activeSourceIds.size} Live</span>
+            <span className="border border-[#242424] px-2 py-1">{availableSources.length} Sources</span>
           </div>
         </header>
 
@@ -145,6 +164,8 @@ function App() {
                 onActiveChange={setActiveSourceIds}
                 onSourcesChange={setAvailableSources}
                 onRemoveSourceReady={handleRemoveSourceReady}
+                defaultSourceIds={shouldStartDemo ? DEFAULT_DEMO_SOURCE_IDS : []}
+                defaultStreamSettings={shouldStartDemo ? DEFAULT_DEMO_STREAM_SETTINGS : {}}
                 autoRestore
               />
             </Panel>
@@ -156,7 +177,7 @@ function App() {
               label="03"
               open={openPanels.keyboard}
               onToggle={() => togglePanel('keyboard')}
-              meta={streamConnected ? 'armed' : 'idle'}
+              meta={streamConnected ? 'Armed' : 'Idle'}
             >
               <Keyboard streamConnected={streamConnected} inputVolume={keyboardVolume} />
             </Panel>
@@ -168,7 +189,7 @@ function App() {
           label="02"
           open={openPanels.mixer}
           onToggle={() => togglePanel('mixer')}
-          meta={`${activeSourceIds.size} tracks`}
+          meta={`${activeSourceIds.size} Tracks`}
         >
           <Controls
             activeSourceIds={activeSourceIds}
@@ -188,7 +209,7 @@ function App() {
             open={openPanels.chords}
             onToggle={() => togglePanel('chords')}
           >
-            <ChordPad streamConnected={streamConnected} inputVolume={chordPadVolume} />
+            <ChordPad streamConnected={streamConnected} inputVolume={chordPadVolume} autoPlayDefaultChord={shouldStartDemo} />
           </Panel>
 
           <Panel
@@ -203,6 +224,15 @@ function App() {
             </div>
           </Panel>
         </div>
+
+        <Panel
+          title="Settings"
+          label="06"
+          open={openPanels.settings}
+          onToggle={() => togglePanel('settings')}
+        >
+          <SettingsPanel />
+        </Panel>
       </main>
     </div>
   );

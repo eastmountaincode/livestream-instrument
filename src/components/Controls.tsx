@@ -25,6 +25,8 @@ interface Props {
 
 const MAX_STREAM_VOLUME = 16;
 const MAX_MIDI_STREAM_VOLUME = MAX_STREAM_VOLUME;
+const MIN_EQ_FREQ = 20;
+const MAX_EQ_FREQ = 20000;
 
 const TRACK_KNOB_CC_GROUPS = [
   [1, 20, 70],
@@ -56,6 +58,25 @@ function formatLocalTime(date: Date, timeZone?: string): string {
   }
 }
 
+function frequencyToSliderValue(freq: number): number {
+  const clamped = Math.max(MIN_EQ_FREQ, Math.min(MAX_EQ_FREQ, freq));
+  const minLog = Math.log(MIN_EQ_FREQ);
+  const maxLog = Math.log(MAX_EQ_FREQ);
+  return ((Math.log(clamped) - minLog) / (maxLog - minLog)) * 100;
+}
+
+function sliderValueToFrequency(value: number): number {
+  const minLog = Math.log(MIN_EQ_FREQ);
+  const maxLog = Math.log(MAX_EQ_FREQ);
+  return Math.round(Math.exp(minLog + (value / 100) * (maxLog - minLog)));
+}
+
+function formatFrequency(freq: number): string {
+  if (freq >= 10000) return `${Math.round(freq / 1000)}k`;
+  if (freq >= 1000) return `${(freq / 1000).toFixed(1)}k`;
+  return `${Math.round(freq)}`;
+}
+
 function StreamWaveform({ id, muted }: { id: string; muted: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number>(0);
@@ -78,20 +99,22 @@ function StreamWaveform({ id, muted }: { id: string; muted: boolean }) {
       ctx.fillStyle = '#fff';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+      const centerY = Math.round(canvas.height / 2) + 0.5;
+
       ctx.strokeStyle = muted ? 'rgba(0,0,0,0.16)' : 'rgba(0,0,0,0.26)';
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(0, canvas.height / 2);
-      ctx.lineTo(canvas.width, canvas.height / 2);
+      ctx.moveTo(0, centerY);
+      ctx.lineTo(canvas.width, centerY);
       ctx.stroke();
 
       ctx.strokeStyle = muted ? 'rgba(0,0,0,0.34)' : '#111';
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = 1;
       ctx.beginPath();
 
       for (let i = 0; i < data.length; i++) {
         const x = (i / (data.length - 1)) * canvas.width;
-        const y = (data[i] / 255) * canvas.height;
+        const y = Math.round((data[i] / 255) * canvas.height) + 0.5;
         if (i === 0) {
           ctx.moveTo(x, y);
         } else {
@@ -143,6 +166,8 @@ function StreamControls({
   const [saved] = useState(() => getStreamSettings(id));
   const [q, setQ] = useState(() => saved?.filterQ ?? audioEngine.getStreamFilterQ(id));
   const [vol, setVol] = useState(() => saved?.volume ?? audioEngine.getStreamVolume(id));
+  const [highPassFreq, setHighPassFreq] = useState(() => saved?.highPassFreq ?? audioEngine.getStreamHighPass(id));
+  const [lowPassFreq, setLowPassFreq] = useState(() => saved?.lowPassFreq ?? audioEngine.getStreamLowPass(id));
   const [oct, setOct] = useState(() => saved?.octaveShift ?? audioEngine.getStreamOctave(id));
   const [pan, setPan] = useState(() => saved?.pan ?? audioEngine.getStreamPan(id));
   const [muted, setMuted] = useState(() => saved?.muted ?? audioEngine.getStreamMuted(id));
@@ -153,6 +178,8 @@ function StreamControls({
     initRef.current = true;
     audioEngine.setStreamFilterQ(id, saved.filterQ);
     audioEngine.setStreamVolume(id, saved.volume);
+    audioEngine.setStreamHighPass(id, saved.highPassFreq);
+    audioEngine.setStreamLowPass(id, saved.lowPassFreq);
     audioEngine.setStreamPan(id, saved.pan);
     audioEngine.setStreamOctave(id, saved.octaveShift);
     audioEngine.setStreamMuted(id, saved.muted);
@@ -163,9 +190,17 @@ function StreamControls({
     setVol(externalVolume);
   }, [externalVolume]);
 
-  const persist = useCallback((overrides: Partial<{ filterQ: number; volume: number; pan: number; octaveShift: number; muted: boolean }>) => {
-    saveStreamSettings(id, { filterQ: overrides.filterQ ?? q, volume: overrides.volume ?? vol, pan: overrides.pan ?? pan, octaveShift: overrides.octaveShift ?? oct, muted: overrides.muted ?? muted });
-  }, [id, q, vol, pan, oct, muted]);
+  const persist = useCallback((overrides: Partial<{ filterQ: number; volume: number; highPassFreq: number; lowPassFreq: number; pan: number; octaveShift: number; muted: boolean }>) => {
+    saveStreamSettings(id, {
+      filterQ: overrides.filterQ ?? q,
+      volume: overrides.volume ?? vol,
+      highPassFreq: overrides.highPassFreq ?? highPassFreq,
+      lowPassFreq: overrides.lowPassFreq ?? lowPassFreq,
+      pan: overrides.pan ?? pan,
+      octaveShift: overrides.octaveShift ?? oct,
+      muted: overrides.muted ?? muted,
+    });
+  }, [id, q, vol, highPassFreq, lowPassFreq, pan, oct, muted]);
 
   return (
     <div className={`grid gap-2 border-b-2 border-black py-3 last:border-b-0 ${muted ? '[&_.sc-name]:opacity-40 [&_.sc-label]:opacity-40 [&_.sc-value]:opacity-40' : ''}`}>
@@ -191,7 +226,7 @@ function StreamControls({
           aria-label={`Remove ${source?.name ?? id}`}
           title="Remove track"
         >
-          X
+          x
         </button>
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-2 pl-0 sm:pl-9">
@@ -302,6 +337,45 @@ function StreamControls({
           M
         </button>
       </div>
+      <div className="flex min-w-0 flex-wrap items-center gap-2 pl-0 sm:pl-9">
+        <span className="sc-label min-w-[92px] text-[11px] font-black uppercase">Track EQ</span>
+        <label className="flex min-w-[180px] flex-1 items-center gap-1 text-black">
+          <span className="sc-label min-w-[24px] text-[11px] font-black uppercase">HP</span>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="0.1"
+            value={frequencyToSliderValue(highPassFreq)}
+            className="flex-1 min-w-0"
+            onChange={e => {
+              const next = Math.max(MIN_EQ_FREQ, Math.min(sliderValueToFrequency(parseFloat(e.target.value)), lowPassFreq - 10));
+              setHighPassFreq(next);
+              audioEngine.setStreamHighPass(id, next);
+              persist({ highPassFreq: next });
+            }}
+          />
+          <span className="sc-value min-w-[42px] text-right font-mono text-[11px] font-black text-black">{formatFrequency(highPassFreq)}</span>
+        </label>
+        <label className="flex min-w-[180px] flex-1 items-center gap-1 text-black">
+          <span className="sc-label min-w-[24px] text-[11px] font-black uppercase">LP</span>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="0.1"
+            value={frequencyToSliderValue(lowPassFreq)}
+            className="flex-1 min-w-0"
+            onChange={e => {
+              const next = Math.min(MAX_EQ_FREQ, Math.max(sliderValueToFrequency(parseFloat(e.target.value)), highPassFreq + 10));
+              setLowPassFreq(next);
+              audioEngine.setStreamLowPass(id, next);
+              persist({ lowPassFreq: next });
+            }}
+          />
+          <span className="sc-value min-w-[42px] text-right font-mono text-[11px] font-black text-black">{formatFrequency(lowPassFreq)}</span>
+        </label>
+      </div>
     </div>
   );
 }
@@ -353,6 +427,8 @@ export function Controls({
       saveStreamSettings(streamId, {
         filterQ: audioEngine.getStreamFilterQ(streamId),
         volume: nextVolume,
+        highPassFreq: audioEngine.getStreamHighPass(streamId),
+        lowPassFreq: audioEngine.getStreamLowPass(streamId),
         pan: audioEngine.getStreamPan(streamId),
         octaveShift: audioEngine.getStreamOctave(streamId),
         muted: audioEngine.getStreamMuted(streamId),
@@ -367,7 +443,7 @@ export function Controls({
     <div className="flex flex-col gap-1.5">
       {streamIds.length === 0 && (
         <div className="flex items-center gap-2 py-1">
-          <span className="border-2 border-black px-2 py-1 text-[11px] font-black uppercase text-black/55">No sources active</span>
+          <span className="border-2 border-black px-2 py-1 text-[11px] font-black uppercase text-black/55">No Sources Active</span>
         </div>
       )}
       {streamIds.map((id, index) => (
@@ -383,8 +459,8 @@ export function Controls({
           onRemoveSource={onRemoveSource}
         />
       ))}
-      <div className="flex flex-wrap items-start gap-3 border-t-2 border-black pt-3">
-        <div className="flex min-w-[280px] flex-1 flex-col gap-2">
+      <div className="flex flex-wrap items-start justify-between gap-4 pt-3">
+        <div className="flex w-full max-w-[820px] flex-col gap-2">
           <label className="flex min-w-0 items-center gap-3 text-black">
             <span className="min-w-[64px] text-[11px] font-black uppercase">Master</span>
             <input

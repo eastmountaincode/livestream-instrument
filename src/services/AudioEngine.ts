@@ -14,6 +14,8 @@
 const VOICES_PER_STREAM = 16;
 const DEFAULT_Q = 30;
 const DEFAULT_VOL = 0.8;
+const DEFAULT_HIGH_PASS_FREQ = 20;
+const DEFAULT_LOW_PASS_FREQ = 20000;
 const ATTACK = 0.02;
 const RELEASE = 0.3;
 const FADE_TIME = 0.5;
@@ -42,6 +44,8 @@ function noteToFreq(note: number): number {
 interface StreamChannel {
   source: MediaElementAudioSourceNode;
   streamGain: GainNode;
+  highPassFilter: BiquadFilterNode;
+  lowPassFilter: BiquadFilterNode;
   analyser: AnalyserNode;
   panner: StereoPannerNode;
   audioElement: HTMLAudioElement;
@@ -49,6 +53,8 @@ interface StreamChannel {
   activeVoices: Map<number, Voice>;
   filterQ: number;
   volume: number;
+  highPassFreq: number;
+  lowPassFreq: number;
   octaveShift: number;
   muted: boolean;
   pan: number;
@@ -100,12 +106,22 @@ export class AudioEngine {
     merger.connect(monoOut);
 
     const streamGain = this.ctx.createGain();
+    const highPassFilter = this.ctx.createBiquadFilter();
+    highPassFilter.type = 'highpass';
+    highPassFilter.frequency.value = DEFAULT_HIGH_PASS_FREQ;
+    highPassFilter.Q.value = 0.707;
+    const lowPassFilter = this.ctx.createBiquadFilter();
+    lowPassFilter.type = 'lowpass';
+    lowPassFilter.frequency.value = this.clampLowPassFrequency(DEFAULT_LOW_PASS_FREQ);
+    lowPassFilter.Q.value = 0.707;
     const analyser = this.ctx.createAnalyser();
     analyser.fftSize = 256;
     analyser.smoothingTimeConstant = 0.85;
     const panner = this.ctx.createStereoPanner();
     panner.pan.value = 0;
-    streamGain.connect(analyser);
+    streamGain.connect(highPassFilter);
+    highPassFilter.connect(lowPassFilter);
+    lowPassFilter.connect(analyser);
     analyser.connect(panner);
     panner.connect(this.masterGain);
 
@@ -135,6 +151,8 @@ export class AudioEngine {
     this.channels.set(id, {
       source,
       streamGain,
+      highPassFilter,
+      lowPassFilter,
       analyser,
       panner,
       audioElement,
@@ -142,6 +160,8 @@ export class AudioEngine {
       activeVoices: new Map(),
       filterQ: DEFAULT_Q,
       volume: DEFAULT_VOL,
+      highPassFreq: DEFAULT_HIGH_PASS_FREQ,
+      lowPassFreq: DEFAULT_LOW_PASS_FREQ,
       octaveShift: 0,
       muted: false,
       pan: 0,
@@ -172,6 +192,8 @@ export class AudioEngine {
       }
       try { ch.source.disconnect(); } catch { /* ok */ }
       try { ch.streamGain.disconnect(); } catch { /* ok */ }
+      try { ch.highPassFilter.disconnect(); } catch { /* ok */ }
+      try { ch.lowPassFilter.disconnect(); } catch { /* ok */ }
       try { ch.analyser.disconnect(); } catch { /* ok */ }
       try { ch.panner.disconnect(); } catch { /* ok */ }
       ch.audioElement.pause();
@@ -382,6 +404,38 @@ export class AudioEngine {
 
   getStreamVolume(id: string): number {
     return this.channels.get(id)?.volume ?? DEFAULT_VOL;
+  }
+
+  private clampHighPassFrequency(freq: number): number {
+    const maxFrequency = Math.max(20, Math.min(20000, this.ctx.sampleRate / 2 - 1));
+    return Number.isFinite(freq) ? Math.max(20, Math.min(maxFrequency, freq)) : DEFAULT_HIGH_PASS_FREQ;
+  }
+
+  private clampLowPassFrequency(freq: number): number {
+    const maxFrequency = Math.max(20, Math.min(20000, this.ctx.sampleRate / 2 - 1));
+    return Number.isFinite(freq) ? Math.max(20, Math.min(maxFrequency, freq)) : DEFAULT_LOW_PASS_FREQ;
+  }
+
+  setStreamHighPass(id: string, freq: number) {
+    const ch = this.channels.get(id);
+    if (!ch) return;
+    ch.highPassFreq = this.clampHighPassFrequency(freq);
+    ch.highPassFilter.frequency.setTargetAtTime(ch.highPassFreq, this.ctx.currentTime, 0.01);
+  }
+
+  getStreamHighPass(id: string): number {
+    return this.channels.get(id)?.highPassFreq ?? DEFAULT_HIGH_PASS_FREQ;
+  }
+
+  setStreamLowPass(id: string, freq: number) {
+    const ch = this.channels.get(id);
+    if (!ch) return;
+    ch.lowPassFreq = this.clampLowPassFrequency(freq);
+    ch.lowPassFilter.frequency.setTargetAtTime(ch.lowPassFreq, this.ctx.currentTime, 0.01);
+  }
+
+  getStreamLowPass(id: string): number {
+    return this.channels.get(id)?.lowPassFreq ?? DEFAULT_LOW_PASS_FREQ;
   }
 
   setStreamMuted(id: string, muted: boolean) {

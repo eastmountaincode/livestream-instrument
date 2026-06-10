@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: "VaxenRounded";
+  src: url("/fonts/VaxenRoundedVF.ttf") format("truetype");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 @layer base {
   * {
     box-sizing: border-box;
@@ -90,6 +98,26 @@ input[type="range"]::-moz-range-track {
   border-width: 1px;
 }
 
+.instrument-ui .border-t-2.border-black {
+  border-color: var(--ui-ink);
+  border-top-width: 1px;
+}
+
+.instrument-ui .border-r-2.border-black {
+  border-color: var(--ui-ink);
+  border-right-width: 1px;
+}
+
+.instrument-ui .border-b-2.border-black {
+  border-color: var(--ui-ink);
+  border-bottom-width: 1px;
+}
+
+.instrument-ui .border-l-2.border-black {
+  border-color: var(--ui-ink);
+  border-left-width: 1px;
+}
+
 .instrument-ui .border-black {
   border-color: var(--ui-ink);
 }
@@ -106,6 +134,20 @@ input[type="range"]::-moz-range-track {
   font-weight: 650;
 }
 
-.instrument-ui .uppercase {
-  letter-spacing: 0.025em;
+.uppercase {
+  text-transform: capitalize;
+  letter-spacing: 0;
+}
+
+.font-mono {
+  font-family: Helvetica, Arial, sans-serif;
+}
+
+.instrument-ui .brand-title {
+  display: inline-block;
+  font-family: "VaxenRounded", Helvetica, Arial, sans-serif;
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 0.9;
+  transform: translateY(0.04em);
 }

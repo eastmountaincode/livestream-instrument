@@ -19,7 +19,7 @@ export function SourceBackdrop({ activeIds, sources }: Props) {
       {activeSources.map(source => (
         <div
           key={source.id}
-          className="absolute inset-0 bg-cover bg-center grayscale transition-opacity duration-2000 ease-in-out"
+          className="absolute inset-0 bg-cover bg-center grayscale"
           style={{
             backgroundImage: `url(${source.imageUrl})`,
             opacity: opacity * 0.22,

@@ -19,7 +19,7 @@ export async function GET(
   const upstreamUrl = `${upstream}/${rest.join('/')}`;
 
   const upstreamResponse = await fetch(upstreamUrl, {
-    headers: { 'User-Agent': 'Resonator/1.0' },
+    headers: { 'User-Agent': 'Cicada/1.0' },
   });
 
   if (!upstreamResponse.ok || !upstreamResponse.body) {

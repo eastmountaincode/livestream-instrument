@@ -3,7 +3,8 @@ import Hls from 'hls.js';
 import { audioEngine } from '../services/AudioEngine';
 import { fetchAcceptedLiveSources, getOrcasoundStreamUrl } from '../services/streams';
 import type { LiveSource } from '../services/streams';
-import { saveActiveStreams, getSavedState } from '../services/storage';
+import { saveActiveStreams, getSavedState, getStreamSettings, saveStreamSettings } from '../services/storage';
+import type { StreamSettings } from '../services/storage';
 
 interface Props {
   onConnected: () => void;
@@ -11,18 +12,14 @@ interface Props {
   onSourcesChange?: (sources: LiveSource[]) => void;
   onRemoveSourceReady?: (removeSource: (sourceId: string) => void) => void;
   autoRestore?: boolean;
+  defaultSourceIds?: string[];
+  defaultStreamSettings?: Record<string, Partial<StreamSettings>>;
 }
 
 interface ActiveStream {
   hls?: Hls;
 }
 
-const typeIconColors: Record<string, string> = {
-  'hydrophone': 'text-black',
-  'weather-radio': 'text-black',
-  'vlf': 'text-black',
-  'soundscape': 'text-black',
-};
 const SOURCE_LOAD_RETRIES = 3;
 const SOURCE_LOAD_RETRY_DELAY_MS = 700;
 
@@ -54,7 +51,15 @@ function wait(ms: number): Promise<void> {
   return new Promise(resolve => window.setTimeout(resolve, ms));
 }
 
-export function StreamSelector({ onConnected, onActiveChange, onSourcesChange, onRemoveSourceReady, autoRestore }: Props) {
+export function StreamSelector({
+  onConnected,
+  onActiveChange,
+  onSourcesChange,
+  onRemoveSourceReady,
+  autoRestore,
+  defaultSourceIds = [],
+  defaultStreamSettings = {},
+}: Props) {
   const [sources, setSources] = useState<LiveSource[]>([]);
   const [sourceLoadError, setSourceLoadError] = useState('');
   const [sourcesReady, setSourcesReady] = useState(false);
@@ -149,6 +154,27 @@ export function StreamSelector({ onConnected, onActiveChange, onSourcesChange, o
 
     const onReady = () => {
       audioEngine.addStream(source.id, audio);
+      const savedSettings = getStreamSettings(source.id);
+      const defaultSettings = defaultStreamSettings[source.id];
+      if (!savedSettings && defaultSettings) {
+        const nextSettings: StreamSettings = {
+          filterQ: defaultSettings.filterQ ?? audioEngine.getStreamFilterQ(source.id),
+          volume: defaultSettings.volume ?? audioEngine.getStreamVolume(source.id),
+          highPassFreq: defaultSettings.highPassFreq ?? audioEngine.getStreamHighPass(source.id),
+          lowPassFreq: defaultSettings.lowPassFreq ?? audioEngine.getStreamLowPass(source.id),
+          pan: defaultSettings.pan ?? audioEngine.getStreamPan(source.id),
+          octaveShift: defaultSettings.octaveShift ?? audioEngine.getStreamOctave(source.id),
+          muted: defaultSettings.muted ?? audioEngine.getStreamMuted(source.id),
+        };
+        audioEngine.setStreamFilterQ(source.id, nextSettings.filterQ);
+        audioEngine.setStreamVolume(source.id, nextSettings.volume);
+        audioEngine.setStreamHighPass(source.id, nextSettings.highPassFreq);
+        audioEngine.setStreamLowPass(source.id, nextSettings.lowPassFreq);
+        audioEngine.setStreamPan(source.id, nextSettings.pan);
+        audioEngine.setStreamOctave(source.id, nextSettings.octaveShift);
+        audioEngine.setStreamMuted(source.id, nextSettings.muted);
+        saveStreamSettings(source.id, nextSettings);
+      }
       audio.play();
       setLoadingIds(prev => {
         const next = new Set(prev);
@@ -235,19 +261,20 @@ export function StreamSelector({ onConnected, onActiveChange, onSourcesChange, o
     } catch (err) {
       onError(String(err));
     }
-  }, [onConnected]);
+  }, [defaultStreamSettings, onConnected]);
 
   // Auto-reconnect saved streams (AudioContext already resumed by Start button)
   useEffect(() => {
     if (!autoRestore || restoredRef.current || !sourcesReady) return;
     restoredRef.current = true;
     const saved = getSavedState();
-    if (!saved?.activeStreamIds.length) return;
-    for (const id of saved.activeStreamIds) {
+    const idsToConnect = saved?.activeStreamIds.length ? saved.activeStreamIds : defaultSourceIds;
+    if (!idsToConnect.length) return;
+    for (const id of idsToConnect) {
       const source = sources.find(s => s.id === id);
       if (source) connect(source);
     }
-  }, [autoRestore, connect, sources, sourcesReady]);
+  }, [autoRestore, connect, defaultSourceIds, sources, sourcesReady]);
 
   const toggle = useCallback((source: LiveSource) => {
     if (activeIds.has(source.id)) {
@@ -257,20 +284,14 @@ export function StreamSelector({ onConnected, onActiveChange, onSourcesChange, o
     }
   }, [activeIds, connect, disconnect]);
 
-  const typeIcons: Record<string, string> = {
-    'hydrophone': '~',
-    'weather-radio': '>',
-    'vlf': '*',
-    'soundscape': '◦',
-  };
   const groupedSources = groupSourcesByCategory(sources);
 
   return (
     <div className="grid gap-2">
-      <div className="max-h-[430px] overflow-y-auto pr-1">
+      <div className="max-h-[176px] overflow-y-auto pr-1">
         <div className="flex flex-col gap-2">
         {!sourcesReady && (
-          <div className="border border-[#242424] bg-[#fbfaf6] px-2 py-1 text-[11px] font-semibold uppercase text-[#68645c]">loading approved stream sources...</div>
+          <div className="border border-[#242424] bg-[#fbfaf6] px-2 py-1 text-[11px] font-semibold uppercase text-[#68645c]">Loading Approved Stream Sources...</div>
         )}
         {groupedSources.map(([category, categorySources]) => (
           <div key={category} className="grid gap-1">
@@ -283,7 +304,7 @@ export function StreamSelector({ onConnected, onActiveChange, onSourcesChange, o
               return (
                 <button
                   key={source.id}
-                  className={`grid min-h-8 w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1 border px-2 py-1 text-left font-mono text-[10px] font-semibold uppercase transition-colors duration-100 ${
+                  className={`grid min-h-8 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border px-2 py-1.5 text-left font-mono text-[10px] font-semibold uppercase ${
                     active
                       ? 'border-[#242424] bg-[#242424] text-[#fbfaf6]'
                       : 'border-[#242424] bg-[#fbfaf6] text-[#171717] hover:bg-[#eeece3]'
@@ -291,8 +312,7 @@ export function StreamSelector({ onConnected, onActiveChange, onSourcesChange, o
                   onClick={() => toggle(source)}
                   title={`${source.description}\n${source.location}${localTime ? `\nLocal time: ${localTime}` : ''}`}
                 >
-                  <span className={`shrink-0 text-[12px] ${active ? 'text-[#fbfaf6]' : typeIconColors[source.type] || ''}`}>{typeIcons[source.type] ?? '◦'}</span>
-                  <span className="min-w-0 truncate leading-tight">{source.name}</span>
+                  <span className="min-w-0 whitespace-normal break-words leading-tight">{source.name}</span>
                   {localTime && (
                     <span className={active ? 'shrink-0 border border-[#fbfaf6] px-1.5 py-0.5 text-[9px] text-[#fbfaf6]' : 'shrink-0 border border-[#242424] px-1.5 py-0.5 text-[9px] text-[#171717]'}>
                       {localTime}
@@ -309,10 +329,10 @@ export function StreamSelector({ onConnected, onActiveChange, onSourcesChange, o
       <div className="flex min-h-[28px] flex-wrap gap-1 border-t border-[#242424] pt-2">
         {sourceLoadError && <span className="border border-[#242424] bg-[#d8cfb7] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#171717]">{sourceLoadError}</span>}
         {sourcesReady && !sourceLoadError && sources.length === 0 && (
-          <span className="border border-[#242424] bg-[#d8cfb7] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#171717]">no approved stream sources loaded</span>
+          <span className="border border-[#242424] bg-[#d8cfb7] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#171717]">No Approved Stream Sources Loaded</span>
         )}
-        {loadingIds.size > 0 && <span className="border border-[#242424] bg-[#d8cfb7] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#171717]">connecting...</span>}
-        {activeIds.size > 0 && <span className="border border-[#242424] bg-[#242424] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#fbfaf6]">{activeIds.size} source{activeIds.size > 1 ? 's' : ''} live</span>}
+        {loadingIds.size > 0 && <span className="border border-[#242424] bg-[#d8cfb7] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#171717]">Connecting...</span>}
+        {activeIds.size > 0 && <span className="border border-[#242424] bg-[#242424] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#fbfaf6]">{activeIds.size} Source{activeIds.size > 1 ? 's' : ''} Live</span>}
         {Array.from(errors.entries()).map(([id, msg]) => (
           <span key={id} className="border border-[#242424] bg-[#d6a19a] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#171717]">{msg}</span>
         ))}

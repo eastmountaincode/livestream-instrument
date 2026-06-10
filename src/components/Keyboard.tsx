@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import { audioEngine } from '../services/AudioEngine';
 import { webrtcService } from '../services/WebRTCService';
 
@@ -66,7 +67,10 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
   const [activeNotes, setActiveNotes] = useState<Set<number>>(new Set());
   const [latchMode, setLatchMode] = useState(false);
   const [baseOctave, setBaseOctave] = useState(3);
+  const [compactVisualRange, setCompactVisualRange] = useState(false);
   const heldKeyNotes = useRef<Map<string, number>>(new Map());
+  const activePointerId = useRef<number | null>(null);
+  const glideNote = useRef<number | null>(null);
 
   const triggerNoteOn = useCallback((note: number, velocity = 100) => {
     const scaledVelocity = Math.max(0, Math.round(velocity * inputVolume));
@@ -117,6 +121,15 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
       audioEngine.updateNoteSourceVelocity(note, scaledVelocity, KEYBOARD_SOURCE);
     }
   }, [activeNotes, inputVolume]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(max-width: 640px)');
+    const syncVisualRange = () => setCompactVisualRange(mediaQuery.matches);
+
+    syncVisualRange();
+    mediaQuery.addEventListener('change', syncVisualRange);
+    return () => mediaQuery.removeEventListener('change', syncVisualRange);
+  }, []);
 
   const nudgeBaseOctave = useCallback((delta: number) => {
     setBaseOctave(prev => Math.max(MIN_BASE_OCTAVE, Math.min(MAX_BASE_OCTAVE, prev + delta)));
@@ -198,10 +211,11 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
     };
   }, [baseOctave, latchMode, nudgeBaseOctave, releaseAll, streamConnected, toggleNote, triggerNoteOff, triggerNoteOn]);
 
-  // Visual piano: 3 octaves starting at C3
+  // Visual piano: 3 octaves on desktop, cleaner C-E span on narrow screens.
   const startNote = 48;
+  const visualKeyCount = compactVisualRange ? 17 : 37;
   const keys: { note: number; black: boolean; name: string }[] = [];
-  for (let i = 0; i < 37; i++) {
+  for (let i = 0; i < visualKeyCount; i++) {
     const note = startNote + i;
     keys.push({ note, black: isBlackKey(note), name: noteName(note) });
   }
@@ -211,28 +225,68 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
     return (KEY_LABELS_BY_OFFSET.get(offset) ?? []).join(' ');
   };
 
-  const handleKeyClick = (note: number) => {
+  const noteFromPointer = (event: ReactPointerEvent): number | null => {
+    const element = document.elementFromPoint(event.clientX, event.clientY);
+    const keyElement = element instanceof HTMLElement
+      ? element.closest<HTMLElement>('[data-key-note]')
+      : null;
+    const note = Number(keyElement?.dataset.keyNote);
+
+    return Number.isFinite(note) ? note : null;
+  };
+
+  const switchGlideNote = useCallback((nextNote: number | null) => {
+    const currentNote = glideNote.current;
+    if (currentNote === nextNote) return;
+
+    if (currentNote !== null) {
+      triggerNoteOff(currentNote);
+    }
+
+    glideNote.current = nextNote;
+
+    if (nextNote !== null) {
+      triggerNoteOn(nextNote);
+    }
+  }, [triggerNoteOff, triggerNoteOn]);
+
+  const endGlide = useCallback(() => {
+    switchGlideNote(null);
+    activePointerId.current = null;
+  }, [switchGlideNote]);
+
+  const handlePointerDown = (event: ReactPointerEvent) => {
+    const note = noteFromPointer(event);
+    if (note === null) return;
+
+    event.preventDefault();
+
     if (latchMode) {
       toggleNote(note);
-    } else {
-      triggerNoteOn(note);
+      return;
     }
+
+    activePointerId.current = event.pointerId;
+    switchGlideNote(note);
   };
 
-  const handleKeyRelease = (note: number) => {
-    if (!latchMode) {
-      triggerNoteOff(note);
-    }
+  const handlePointerMove = (event: ReactPointerEvent) => {
+    if (activePointerId.current !== event.pointerId) return;
+
+    event.preventDefault();
+    switchGlideNote(noteFromPointer(event));
   };
 
-  const handleKeyLeave = (note: number) => {
-    if (!latchMode && activeNotes.has(note)) {
-      triggerNoteOff(note);
-    }
+  const handlePointerEnd = (event: ReactPointerEvent) => {
+    if (activePointerId.current !== event.pointerId) return;
+
+    event.preventDefault();
+    endGlide();
   };
 
   const whiteKeys = keys.filter(k => !k.black);
   const blackKeys = keys.filter(k => k.black);
+  const blackKeyWidthPercent = (100 / whiteKeys.length) * 0.64;
 
   return (
     <div className="grid gap-3">
@@ -245,7 +299,7 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
           }`}
           onClick={() => setLatchMode(prev => !prev)}
         >
-          {latchMode ? 'LATCH ON' : 'LATCH'}
+          {latchMode ? 'Latch On' : 'Latch'}
         </button>
         <div className="flex items-center gap-1 text-[11px] font-black uppercase text-black">
           <button
@@ -269,25 +323,31 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
             className="border-2 border-black bg-[#f3d85a] px-2.5 py-1 font-mono text-[10px] font-black uppercase text-black hover:bg-black hover:text-white"
             onClick={releaseAll}
           >
-            RELEASE ALL
+            Release All
           </button>
         )}
         {!streamConnected && <span className="ml-auto border-2 border-black px-2 py-1 text-[10px] font-black uppercase text-black/55">Select a live source to play</span>}
       </div>
-      <div className="relative flex h-[168px] border-2 border-black bg-white">
-        {whiteKeys.map(k => {
+      <div
+        className={`relative flex touch-none select-none ${compactVisualRange ? 'h-[104px]' : 'h-[168px]'} overflow-hidden border-2 border-black bg-white`}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerEnd}
+        onPointerCancel={handlePointerEnd}
+        onPointerLeave={handlePointerEnd}
+      >
+        {whiteKeys.map((k, index) => {
           const active = activeNotes.has(k.note);
+          const rightBorder = index === whiteKeys.length - 1 ? 'border-r-0' : 'border-r-2 border-black';
           return (
             <div
               key={k.note}
-              className={`relative z-[1] flex h-full flex-1 cursor-pointer flex-col items-center justify-end border-r-2 border-black pb-1.5 transition-[background] duration-50 last:border-r-0 ${
+              data-key-note={k.note}
+              className={`relative z-[1] flex h-full flex-1 cursor-pointer flex-col items-center justify-end pb-1 ${rightBorder} ${
                 active
                   ? 'bg-black text-white'
                   : 'bg-white text-black hover:bg-[#f2f0e8]'
               }`}
-              onMouseDown={() => handleKeyClick(k.note)}
-              onMouseUp={() => handleKeyRelease(k.note)}
-              onMouseLeave={() => handleKeyLeave(k.note)}
             >
               <span className={`text-[9px] font-black ${active ? 'text-white' : 'text-black/55'}`}>{keyLabel(k.note)}</span>
               <span className={`text-[8px] font-bold ${active ? 'text-white/70' : 'text-black/40'}`}>{k.name}</span>
@@ -296,20 +356,18 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
         })}
         {blackKeys.map(k => {
           const whitesBefore = keys.filter(wk => !wk.black && wk.note < k.note).length;
-          const leftPercent = ((whitesBefore - 0.3) / whiteKeys.length) * 100;
+          const leftPercent = ((whitesBefore - 0.32) / whiteKeys.length) * 100;
           const active = activeNotes.has(k.note);
           return (
             <div
               key={k.note}
-              className={`absolute z-[2] flex h-[60%] w-[3.2%] cursor-pointer flex-col items-center justify-end border-2 border-black pb-1 transition-[background] duration-50 ${
+              data-key-note={k.note}
+              className={`absolute z-[2] flex h-[60%] cursor-pointer flex-col items-center justify-end border-2 border-black pb-1 ${
                 active
                   ? 'bg-[#f3d85a] text-black'
                   : 'bg-black text-white hover:bg-[#2a2a2a]'
               }`}
-              style={{ left: `${leftPercent}%` }}
-              onMouseDown={() => handleKeyClick(k.note)}
-              onMouseUp={() => handleKeyRelease(k.note)}
-              onMouseLeave={() => handleKeyLeave(k.note)}
+              style={{ left: `${leftPercent}%`, width: `${blackKeyWidthPercent}%` }}
             >
               <span className={`text-[9px] font-black ${active ? 'text-black' : 'text-white/65'}`}>{keyLabel(k.note)}</span>
             </div>

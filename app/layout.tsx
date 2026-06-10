@@ -2,7 +2,9 @@ import type { Metadata } from 'next';
 import '../src/App.css';
 
 export const metadata: Metadata = {
-  title: 'Resonator',
+  title: 'Cicada',
+  applicationName: 'Cicada',
+  appleWebApp: { title: 'Cicada' },
   icons: { icon: '/favicon.svg' },
 };
 

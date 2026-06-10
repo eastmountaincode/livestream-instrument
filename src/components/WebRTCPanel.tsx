@@ -3,6 +3,13 @@ import { webrtcService } from '../services/WebRTCService';
 import type { PeerRole } from '../services/WebRTCService';
 import { audioEngine } from '../services/AudioEngine';
 
+function titleCaseValue(value: string) {
+  return value
+    .split(/([ _-])/)
+    .map(part => /^[a-z]/.test(part) ? part.charAt(0).toUpperCase() + part.slice(1) : part)
+    .join('');
+}
+
 export function WebRTCPanel() {
   const [role, setRole] = useState<PeerRole>(webrtcService.getRole());
   const [state, setState] = useState(webrtcService.getState());
@@ -61,7 +68,7 @@ export function WebRTCPanel() {
     <div className="grid gap-3 border-t border-[#242424] pt-3">
       <h3 className="m-0 text-[11px] font-semibold uppercase text-[#171717]">WebRTC Peer Sync</h3>
       <div className="text-xs font-semibold uppercase text-[#171717]">
-        Status: <span className={`border border-[#242424] px-2 py-0.5 text-[11px] font-semibold ${statusBadgeClass(state)}`}>{state}</span>
+        Status: <span className={`border border-[#242424] px-2 py-0.5 text-[11px] font-semibold ${statusBadgeClass(state)}`}>{titleCaseValue(state)}</span>
       </div>
 
       {state === 'disconnected' && (
@@ -127,7 +134,7 @@ export function WebRTCPanel() {
 
       {state === 'connected' && (
         <div>
-          <p className="mb-2 text-xs font-semibold uppercase text-[#171717]">Connected as <strong>{role}</strong></p>
+          <p className="mb-2 text-xs font-semibold uppercase text-[#171717]">Connected As <strong>{titleCaseValue(role)}</strong></p>
           {role === 'leader' && (
             <div>
               <button

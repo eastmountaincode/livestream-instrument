@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
 
   const upstreamResponse = await fetch(upstreamUrl, {
     headers: {
-      'User-Agent': 'Resonator/1.0',
+      'User-Agent': 'Cicada/1.0',
       'Accept': 'audio/*,*/*;q=0.8',
     },
     cache: 'no-store',

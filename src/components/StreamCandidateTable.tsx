@@ -16,6 +16,13 @@ interface ApiResponse {
 const STATUS_OPTIONS: StreamReviewStatus[] = ['unreviewed', 'accepted', 'rejected'];
 const fieldClass = 'h-9 w-full border-2 border-black bg-white px-3 text-black outline-none focus:bg-[#f3d85a] disabled:bg-[#f2f0e8] disabled:text-black/60';
 
+function titleCaseValue(value: string) {
+  return value
+    .split(' ')
+    .map(word => word ? word.charAt(0).toUpperCase() + word.slice(1) : word)
+    .join(' ');
+}
+
 function statusClass(status: StreamReviewStatus): string {
   if (status === 'accepted') return 'border-black bg-black text-white';
   if (status === 'rejected') return 'border-black bg-[#f18a7a] text-black';
@@ -304,16 +311,16 @@ export function StreamCandidateTable() {
       <div className="mx-auto flex max-w-[1500px] flex-col gap-3 px-4 py-4">
         <header className="flex flex-wrap items-center justify-between gap-3 border-2 border-black bg-white p-3">
           <div className="flex items-baseline gap-3">
-            <a href="/" className="border-2 border-black bg-black px-2 py-1 text-sm font-black uppercase text-white hover:bg-white hover:text-black">Resonator</a>
+            <a href="/" className="border-2 border-black bg-black px-2 py-1 text-sm font-black uppercase text-white hover:bg-white hover:text-black">Cicada</a>
             <h1 className="text-base font-black uppercase text-black">Stream Review</h1>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-[11px] font-black uppercase text-black">
-            <span className="border-2 border-black px-2 py-1">{counts.total} rows</span>
-            <span className="border-2 border-black px-2 py-1">{counts.accepted} accepted</span>
-            <span className="border-2 border-black px-2 py-1">{counts.rejected} rejected</span>
-            <span className="border-2 border-black px-2 py-1">{counts.unreviewed} unreviewed</span>
+            <span className="border-2 border-black px-2 py-1">{counts.total} Rows</span>
+            <span className="border-2 border-black px-2 py-1">{counts.accepted} Accepted</span>
+            <span className="border-2 border-black px-2 py-1">{counts.rejected} Rejected</span>
+            <span className="border-2 border-black px-2 py-1">{counts.unreviewed} Unreviewed</span>
             <span className={saveState === 'error' ? 'border-2 border-black bg-[#f18a7a] px-2 py-1 text-black' : 'border-2 border-black px-2 py-1 text-black'}>
-              {saveState === 'loading' ? 'loading' : saveState === 'saving' ? 'saving' : saveState === 'saved' ? 'saved' : saveState === 'error' ? 'error' : writable ? 'ready' : 'read only'}
+              {saveState === 'loading' ? 'Loading' : saveState === 'saving' ? 'Saving' : saveState === 'saved' ? 'Saved' : saveState === 'error' ? 'Error' : writable ? 'Ready' : 'Read Only'}
             </span>
           </div>
         </header>
@@ -336,7 +343,7 @@ export function StreamCandidateTable() {
             value={categoryFilter}
             onChange={event => setCategoryFilter(event.target.value)}
           >
-            <option value="all">All categories</option>
+            <option value="all">All Categories</option>
             {categories.map(category => (
               <option key={category} value={category}>{category}</option>
             ))}
@@ -346,9 +353,9 @@ export function StreamCandidateTable() {
             value={statusFilter}
             onChange={event => setStatusFilter(event.target.value as StreamReviewStatus | 'all')}
           >
-            <option value="all">All statuses</option>
+            <option value="all">All Statuses</option>
             {STATUS_OPTIONS.map(status => (
-              <option key={status} value={status}>{status}</option>
+              <option key={status} value={status}>{titleCaseValue(status)}</option>
             ))}
           </select>
         </section>
@@ -385,7 +392,7 @@ export function StreamCandidateTable() {
                       onChange={event => updateCandidate(candidate.id, { status: event.target.value as StreamReviewStatus })}
                     >
                       {STATUS_OPTIONS.map(status => (
-                        <option key={status} value={status}>{status}</option>
+                        <option key={status} value={status}>{titleCaseValue(status)}</option>
                       ))}
                     </select>
                   </td>
