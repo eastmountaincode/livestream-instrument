@@ -10,6 +10,7 @@ const MIDI_SOURCE = 'midi';
 
 export type MidiDeviceInfo = { id: string; name: string };
 export type MidiUpdateCallback = () => void;
+export type MidiNoteEvent = { type: 'on' | 'off'; note: number; velocity: number };
 
 interface HeldMidiNote {
   count: number;
@@ -22,13 +23,18 @@ class MidiService {
   private selectedOutput: MIDIOutput | null = null;
   private listeners: MidiUpdateCallback[] = [];
   private ccCallbacks: ((cc: number, value: number) => void)[] = [];
+  private noteCallbacks: ((event: MidiNoteEvent) => void)[] = [];
   private inputVolume = 1;
   private activeNotes: Map<number, HeldMidiNote> = new Map();
 
   async init(): Promise<boolean> {
     try {
       this.access = await navigator.requestMIDIAccess({ sysex: false });
-      this.access.onstatechange = () => this.notifyListeners();
+      this.access.onstatechange = () => {
+        this.ensureSelectedInput();
+        this.notifyListeners();
+      };
+      this.ensureSelectedInput();
       this.notifyListeners();
       return true;
     } catch {
@@ -61,6 +67,7 @@ class MidiService {
     }
     if (!id || !this.access) {
       this.selectedInput = null;
+      this.notifyListeners();
       return;
     }
     this.selectedInput = this.access.inputs.get(id) || null;
@@ -94,6 +101,11 @@ class MidiService {
     return () => { this.ccCallbacks = this.ccCallbacks.filter(c => c !== cb); };
   }
 
+  onNote(cb: (event: MidiNoteEvent) => void) {
+    this.noteCallbacks.push(cb);
+    return () => { this.noteCallbacks = this.noteCallbacks.filter(c => c !== cb); };
+  }
+
   onChange(cb: MidiUpdateCallback) {
     this.listeners.push(cb);
     return () => { this.listeners = this.listeners.filter(l => l !== cb); };
@@ -101,6 +113,26 @@ class MidiService {
 
   private notifyListeners() {
     for (const l of this.listeners) l();
+  }
+
+  private ensureSelectedInput() {
+    if (!this.access) return;
+    if (this.selectedInput && this.access.inputs.has(this.selectedInput.id)) return;
+
+    if (this.selectedInput) {
+      this.selectedInput.onmidimessage = null;
+      this.selectedInput = null;
+    }
+
+    const firstInput = this.access.inputs.values().next().value as MIDIInput | undefined;
+    if (firstInput) {
+      this.selectedInput = firstInput;
+      this.selectedInput.onmidimessage = this.handleMidiMessage;
+    }
+  }
+
+  private notifyNote(event: MidiNoteEvent) {
+    for (const cb of this.noteCallbacks) cb(event);
   }
 
   private scaleVelocity(velocity: number) {
@@ -126,6 +158,7 @@ class MidiService {
           this.activeNotes.set(note, { count: 1, velocity });
         }
         audioEngine.noteOn(note, this.scaleVelocity(velocity), MIDI_SOURCE);
+        this.notifyNote({ type: 'on', note, velocity });
       } else {
         this.releaseMidiNote(note);
       }
@@ -156,6 +189,7 @@ class MidiService {
     }
 
     audioEngine.noteOff(note, MIDI_SOURCE);
+    this.notifyNote({ type: 'off', note, velocity: 0 });
   }
 }
 

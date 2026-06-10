@@ -9,6 +9,7 @@ export function MidiPanel() {
   const [selectedOutput, setSelectedOutput] = useState<string | null>(null);
   const [available, setAvailable] = useState(true);
   const [lastCC, setLastCC] = useState('');
+  const [lastNote, setLastNote] = useState('');
 
   useEffect(() => {
     midiService.init().then(ok => {
@@ -20,16 +21,28 @@ export function MidiPanel() {
     const unsubCC = midiService.onCC((cc, val) => {
       setLastCC(`CC${cc} = ${val}`);
     });
+    const unsubNote = midiService.onNote(event => {
+      setLastNote(event.type === 'on' ? `Note ${event.note} On` : `Note ${event.note} Off`);
+    });
 
-    return () => { unsub(); unsubCC(); };
+    return () => { unsub(); unsubCC(); unsubNote(); };
   }, []);
 
   const refreshDevices = () => {
-    setInputs(midiService.getInputs());
+    const nextInputs = midiService.getInputs();
+    setInputs(nextInputs);
     setOutputs(midiService.getOutputs());
-    setSelectedInput(midiService.getSelectedInputId());
+    const currentInputId = midiService.getSelectedInputId();
+    if (!currentInputId && nextInputs.length > 0) {
+      midiService.selectInput(nextInputs[0].id);
+      setSelectedInput(nextInputs[0].id);
+    } else {
+      setSelectedInput(currentInputId);
+    }
     setSelectedOutput(midiService.getSelectedOutputId());
   };
+
+  const selectedInputName = inputs.find(input => input.id === selectedInput)?.name;
 
   if (!available) {
     return (
@@ -46,6 +59,19 @@ export function MidiPanel() {
       <p className="m-0 text-[10px] font-medium uppercase text-[#68645c]">
         Plug in a MIDI keyboard to play. Mod wheel (CC1) controls resonance.
       </p>
+      <div className="flex min-h-[24px] flex-wrap gap-1">
+        <span className={`border border-[#242424] px-2 py-0.5 text-[10px] font-semibold uppercase ${
+          inputs.length > 0 ? 'bg-[#242424] text-[#fbfaf6]' : 'bg-[#d8cfb7] text-[#171717]'
+        }`}>
+          {inputs.length > 0 ? `${inputs.length} Input${inputs.length > 1 ? 's' : ''} Detected` : 'No Input Detected'}
+        </span>
+        {selectedInputName && (
+          <span className="border border-[#242424] bg-[#fbfaf6] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#171717]">
+            {selectedInputName}
+          </span>
+        )}
+        {lastNote && <span className="border border-[#242424] bg-[#d8cfb7] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#171717]">{lastNote}</span>}
+      </div>
       <div className="flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-1.5 text-[11px] font-semibold uppercase text-[#171717]">
           Input

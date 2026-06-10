@@ -130,6 +130,30 @@ input[type="range"]::-moz-range-track {
   background-color: var(--ui-ink);
 }
 
+.instrument-ui .hover\:bg-black:hover {
+  background-color: var(--ui-ink);
+}
+
+.instrument-ui .hover\:text-white:hover {
+  color: var(--ui-paper);
+}
+
+.instrument-ui .icon-button {
+  background-color: var(--ui-paper);
+  border-color: var(--ui-ink);
+  color: var(--ui-ink);
+}
+
+.instrument-ui .icon-button:hover:not(:disabled) {
+  background-color: var(--ui-ink);
+  color: var(--ui-paper);
+}
+
+.instrument-ui .icon-button:disabled {
+  background-color: var(--ui-surface);
+  color: var(--ui-muted);
+}
+
 .instrument-ui .font-black {
   font-weight: 650;
 }

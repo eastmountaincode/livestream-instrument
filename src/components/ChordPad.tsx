@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { Minus, Plus } from 'lucide-react';
 import { audioEngine } from '../services/AudioEngine';
 import { webrtcService } from '../services/WebRTCService';
 
@@ -167,14 +168,22 @@ export function ChordPad({ streamConnected, inputVolume, autoPlayDefaultChord = 
         </button>
         <div className="flex items-center gap-1 text-[11px] font-black uppercase text-black">
           <button
-            className="flex h-6 w-6 items-center justify-center border-2 border-black bg-white p-0 text-xs text-black hover:bg-black hover:text-white"
+            className="icon-button flex h-7 w-7 items-center justify-center border-2 border-black p-0"
             onClick={() => setInversion(Math.max(0, inversion - 1))}
-          >-</button>
+            aria-label="Decrease chord inversion"
+            title="Decrease chord inversion"
+          >
+            <Minus aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={2.5} />
+          </button>
           <span>Inv {inversion}</span>
           <button
-            className="flex h-6 w-6 items-center justify-center border-2 border-black bg-white p-0 text-xs text-black hover:bg-black hover:text-white"
+            className="icon-button flex h-7 w-7 items-center justify-center border-2 border-black p-0"
             onClick={() => setInversion(Math.min(maxInversion, inversion + 1))}
-          >+</button>
+            aria-label="Increase chord inversion"
+            title="Increase chord inversion"
+          >
+            <Plus aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={2.5} />
+          </button>
         </div>
         <button
           className="ml-auto border-2 border-black bg-white px-2.5 py-1 font-mono text-[10px] font-black uppercase text-black hover:bg-black hover:text-white"

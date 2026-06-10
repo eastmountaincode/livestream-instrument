@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { Minus, Plus, X } from 'lucide-react';
 import { audioEngine } from '../services/AudioEngine';
 import type { LiveSource } from '../services/streams';
 import { midiService } from '../services/MidiService';
@@ -56,6 +57,16 @@ function formatLocalTime(date: Date, timeZone?: string): string {
   } catch {
     return '';
   }
+}
+
+function formatCategory(category?: string): string {
+  if (!category || category === 'uncategorized') return '';
+
+  return category
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
 }
 
 function frequencyToSliderValue(freq: number): number {
@@ -160,6 +171,7 @@ function StreamControls({
 }) {
   const source = sources.find(s => s.id === id);
   const localTime = formatLocalTime(clock, source?.timeZone);
+  const categoryLabel = formatCategory(source?.category);
   const initRef = useRef(false);
 
   // Load saved settings once and use as initial state
@@ -214,19 +226,24 @@ function StreamControls({
             <span className="shrink-0 text-[10px] font-bold uppercase text-black/50">{source.location}</span>
           )}
           {localTime && (
-            <span className="shrink-0 border border-black bg-[#f2f0e8] px-1.5 py-0.5 text-[10px] font-black text-black">
+            <span className="sc-value shrink-0 border border-black bg-[#f2f0e8] px-1.5 py-0.5 text-[10px] font-black text-black">
               {localTime}
+            </span>
+          )}
+          {categoryLabel && (
+            <span className="sc-value shrink-0 rounded-full border border-black bg-[#f2f0e8] px-2 py-0.5 text-[10px] font-black text-black">
+              {categoryLabel}
             </span>
           )}
         </div>
         <button
           type="button"
-          className="flex h-6 w-6 shrink-0 items-center justify-center border-2 border-black bg-white p-0 font-mono text-[11px] font-black text-black hover:bg-black hover:text-white"
+          className="icon-button flex h-7 w-7 shrink-0 items-center justify-center border-2 border-black p-0"
           onClick={() => onRemoveSource(id)}
           aria-label={`Remove ${source?.name ?? id}`}
           title="Remove track"
         >
-          x
+          <X aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={2.5} />
         </button>
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-2 pl-0 sm:pl-9">
@@ -287,24 +304,32 @@ function StreamControls({
         </label>
         <div className="flex shrink-0 items-center gap-1 text-[11px] font-black uppercase text-black">
           <button
-            className="flex h-6 w-6 items-center justify-center border-2 border-black bg-white p-0 text-xs text-black hover:bg-black hover:text-white"
+            className="icon-button flex h-7 w-7 items-center justify-center border-2 border-black p-0"
             onClick={() => {
               const next = oct - 1;
               setOct(next);
               audioEngine.setStreamOctave(id, next);
               persist({ octaveShift: next });
             }}
-          >-</button>
+            aria-label="Lower track octave"
+            title="Lower track octave"
+          >
+            <Minus aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={2.5} />
+          </button>
           <span>Oct {oct >= 0 ? `+${oct}` : oct}</span>
           <button
-            className="flex h-6 w-6 items-center justify-center border-2 border-black bg-white p-0 text-xs text-black hover:bg-black hover:text-white"
+            className="icon-button flex h-7 w-7 items-center justify-center border-2 border-black p-0"
             onClick={() => {
               const next = oct + 1;
               setOct(next);
               audioEngine.setStreamOctave(id, next);
               persist({ octaveShift: next });
             }}
-          >+</button>
+            aria-label="Raise track octave"
+            title="Raise track octave"
+          >
+            <Plus aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={2.5} />
+          </button>
         </div>
         <button
           className={`h-7 w-7 shrink-0 border-2 font-mono text-[10px] font-black ${

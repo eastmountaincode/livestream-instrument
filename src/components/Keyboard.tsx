@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
+import { Minus, Plus } from 'lucide-react';
 import { audioEngine } from '../services/AudioEngine';
 import { webrtcService } from '../services/WebRTCService';
+import { midiService } from '../services/MidiService';
 
 const KEYBOARD_SOURCE = 'keyboard';
 const MIN_BASE_OCTAVE = 1;
@@ -65,8 +67,9 @@ interface Props {
 
 export function Keyboard({ streamConnected, inputVolume }: Props) {
   const [activeNotes, setActiveNotes] = useState<Set<number>>(new Set());
+  const [activeMidiNotes, setActiveMidiNotes] = useState<Set<number>>(new Set());
   const [latchMode, setLatchMode] = useState(false);
-  const [baseOctave, setBaseOctave] = useState(3);
+  const [baseOctave, setBaseOctave] = useState(4);
   const [compactVisualRange, setCompactVisualRange] = useState(false);
   const heldKeyNotes = useRef<Map<string, number>>(new Map());
   const activePointerId = useRef<number | null>(null);
@@ -121,6 +124,18 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
       audioEngine.updateNoteSourceVelocity(note, scaledVelocity, KEYBOARD_SOURCE);
     }
   }, [activeNotes, inputVolume]);
+
+  useEffect(() => midiService.onNote(event => {
+    setActiveMidiNotes(prev => {
+      const next = new Set(prev);
+      if (event.type === 'on') {
+        next.add(event.note);
+      } else {
+        next.delete(event.note);
+      }
+      return next;
+    });
+  }), []);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia('(max-width: 640px)');
@@ -212,7 +227,7 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
   }, [baseOctave, latchMode, nudgeBaseOctave, releaseAll, streamConnected, toggleNote, triggerNoteOff, triggerNoteOn]);
 
   // Visual piano: 3 octaves on desktop, cleaner C-E span on narrow screens.
-  const startNote = 48;
+  const startNote = (baseOctave + 1) * 12;
   const visualKeyCount = compactVisualRange ? 17 : 37;
   const keys: { note: number; black: boolean; name: string }[] = [];
   for (let i = 0; i < visualKeyCount; i++) {
@@ -287,6 +302,7 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
   const whiteKeys = keys.filter(k => !k.black);
   const blackKeys = keys.filter(k => k.black);
   const blackKeyWidthPercent = (100 / whiteKeys.length) * 0.64;
+  const displayedActiveNotes = new Set([...activeNotes, ...activeMidiNotes]);
 
   return (
     <div className="grid gap-3">
@@ -303,19 +319,23 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
         </button>
         <div className="flex items-center gap-1 text-[11px] font-black uppercase text-black">
           <button
-            className="flex h-6 w-6 items-center justify-center border-2 border-black bg-white p-0 text-xs text-black hover:bg-black hover:text-white disabled:opacity-30"
+            className="icon-button flex h-7 w-7 items-center justify-center border-2 border-black p-0 disabled:opacity-60"
             onClick={() => nudgeBaseOctave(-1)}
             disabled={baseOctave <= MIN_BASE_OCTAVE}
+            aria-label="Lower key range"
+            title="Lower key range"
           >
-            -
+            <Minus aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={2.5} />
           </button>
           <span>Keys C{baseOctave}-G{baseOctave + 1}</span>
           <button
-            className="flex h-6 w-6 items-center justify-center border-2 border-black bg-white p-0 text-xs text-black hover:bg-black hover:text-white disabled:opacity-30"
+            className="icon-button flex h-7 w-7 items-center justify-center border-2 border-black p-0 disabled:opacity-60"
             onClick={() => nudgeBaseOctave(1)}
             disabled={baseOctave >= MAX_BASE_OCTAVE}
+            aria-label="Raise key range"
+            title="Raise key range"
           >
-            +
+            <Plus aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={2.5} />
           </button>
         </div>
         {latchMode && (
@@ -337,7 +357,7 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
         onPointerLeave={handlePointerEnd}
       >
         {whiteKeys.map((k, index) => {
-          const active = activeNotes.has(k.note);
+          const active = displayedActiveNotes.has(k.note);
           const rightBorder = index === whiteKeys.length - 1 ? 'border-r-0' : 'border-r-2 border-black';
           return (
             <div
@@ -357,7 +377,7 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
         {blackKeys.map(k => {
           const whitesBefore = keys.filter(wk => !wk.black && wk.note < k.note).length;
           const leftPercent = ((whitesBefore - 0.32) / whiteKeys.length) * 100;
-          const active = activeNotes.has(k.note);
+          const active = displayedActiveNotes.has(k.note);
           return (
             <div
               key={k.note}

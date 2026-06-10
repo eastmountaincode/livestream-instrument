@@ -39,11 +39,13 @@ interface PanelProps {
   onToggle: () => void;
   children: ReactNode;
   meta?: ReactNode;
+  className?: string;
+  bodyClassName?: string;
 }
 
-function Panel({ title, label, open, onToggle, children, meta }: PanelProps) {
+function Panel({ title, label, open, onToggle, children, meta, className = '', bodyClassName = '' }: PanelProps) {
   return (
-    <section className="border border-[#242424] bg-[#fbfaf6]">
+    <section className={`w-full border border-[#242424] bg-[#fbfaf6] ${className}`}>
       <button
         type="button"
         className="flex w-full items-center justify-between gap-3 border-b border-[#242424] bg-[#eeece3] px-3 py-2 text-left text-[11px] font-semibold uppercase text-[#171717] hover:bg-[#242424] hover:text-[#fbfaf6]"
@@ -59,7 +61,7 @@ function Panel({ title, label, open, onToggle, children, meta }: PanelProps) {
           <span>{open ? 'Close' : 'Open'}</span>
         </span>
       </button>
-      {open && <div className="p-3">{children}</div>}
+      {open && <div className={`p-3 ${bodyClassName}`}>{children}</div>}
     </section>
   );
 }
@@ -133,6 +135,8 @@ function App() {
     );
   }
 
+  const shouldEqualizeTopPanels = openPanels.sources && openPanels.keyboard;
+
   return (
     <div className="instrument-ui relative min-h-screen bg-[#ebe8de] text-[#171717]">
       <SourceBackdrop activeIds={activeSourceIds} sources={availableSources} />
@@ -150,14 +154,15 @@ function App() {
 
         <Visualizer />
 
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
-          <div className="lg:w-[340px] lg:shrink-0">
+        <div className={`flex flex-col gap-3 lg:flex-row ${shouldEqualizeTopPanels ? 'lg:items-stretch' : 'lg:items-start'}`}>
+          <div className="flex lg:w-[340px] lg:shrink-0">
             <Panel
               title="Live Sources"
               label="01"
               open={openPanels.sources}
               onToggle={() => togglePanel('sources')}
               meta={`${activeSourceIds.size}/${availableSources.length}`}
+              className={shouldEqualizeTopPanels ? 'h-full' : ''}
             >
               <StreamSelector
                 onConnected={() => { setStreamConnected(true); setLoading(false); }}
@@ -171,13 +176,14 @@ function App() {
             </Panel>
           </div>
 
-          <div className={openPanels.keyboard ? 'lg:min-w-0 lg:flex-1' : 'lg:w-[260px] lg:shrink-0'}>
+          <div className="flex lg:min-w-0 lg:flex-1">
             <Panel
               title="Keyboard"
               label="03"
               open={openPanels.keyboard}
               onToggle={() => togglePanel('keyboard')}
               meta={streamConnected ? 'Armed' : 'Idle'}
+              className={shouldEqualizeTopPanels ? 'h-full' : ''}
             >
               <Keyboard streamConnected={streamConnected} inputVolume={keyboardVolume} />
             </Panel>
@@ -208,6 +214,7 @@ function App() {
             label="04"
             open={openPanels.chords}
             onToggle={() => togglePanel('chords')}
+            className="self-start"
           >
             <ChordPad streamConnected={streamConnected} inputVolume={chordPadVolume} autoPlayDefaultChord={shouldStartDemo} />
           </Panel>
@@ -217,6 +224,7 @@ function App() {
             label="05"
             open={openPanels.io}
             onToggle={() => togglePanel('io')}
+            className="self-start"
           >
             <div className="grid gap-3">
               <MidiPanel />
