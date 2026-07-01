@@ -14,7 +14,7 @@ interface ApiResponse {
 }
 
 const STATUS_OPTIONS: StreamReviewStatus[] = ['unreviewed', 'accepted', 'rejected'];
-const fieldClass = 'h-9 w-full border-2 border-black bg-white px-3 text-black outline-none focus:bg-[#f3d85a] disabled:bg-[#f2f0e8] disabled:text-black/60';
+const fieldClass = 'h-9 w-full border-2 border-black bg-white px-3 text-black outline-none focus:bg-warning disabled:bg-soft disabled:text-black/60';
 
 function titleCaseValue(value: string) {
   return value
@@ -25,7 +25,7 @@ function titleCaseValue(value: string) {
 
 function statusClass(status: StreamReviewStatus): string {
   if (status === 'accepted') return 'border-black bg-black text-white';
-  if (status === 'rejected') return 'border-black bg-[#f18a7a] text-black';
+  if (status === 'rejected') return 'border-black bg-error text-black';
   return 'border-black bg-white text-black';
 }
 
@@ -170,7 +170,7 @@ function AuditionCell({ candidate }: { candidate: StreamCandidate }) {
           </a>
         )}
       </div>
-      {error && <span className="border-2 border-black bg-[#f18a7a] px-1 text-[10px] font-black uppercase text-black">{error}</span>}
+      {error && <span className="border-2 border-black bg-error px-1 text-[10px] font-black uppercase text-black">{error}</span>}
       <audio
         ref={audioRef}
         onError={() => {
@@ -307,7 +307,7 @@ export function StreamCandidateTable() {
   }), [candidates]);
 
   return (
-    <main className="min-h-screen bg-[#f2f0e8] text-black">
+    <main className="min-h-screen bg-soft text-black">
       <div className="mx-auto flex max-w-[1500px] flex-col gap-3 px-4 py-4">
         <header className="flex flex-wrap items-center justify-between gap-3 border-2 border-black bg-white p-3">
           <div className="flex items-baseline gap-3">
@@ -319,27 +319,27 @@ export function StreamCandidateTable() {
             <span className="border-2 border-black px-2 py-1">{counts.accepted} Accepted</span>
             <span className="border-2 border-black px-2 py-1">{counts.rejected} Rejected</span>
             <span className="border-2 border-black px-2 py-1">{counts.unreviewed} Unreviewed</span>
-            <span className={saveState === 'error' ? 'border-2 border-black bg-[#f18a7a] px-2 py-1 text-black' : 'border-2 border-black px-2 py-1 text-black'}>
+            <span className={saveState === 'error' ? 'border-2 border-black bg-error px-2 py-1 text-black' : 'border-2 border-black px-2 py-1 text-black'}>
               {saveState === 'loading' ? 'Loading' : saveState === 'saving' ? 'Saving' : saveState === 'saved' ? 'Saved' : saveState === 'error' ? 'Error' : writable ? 'Ready' : 'Read Only'}
             </span>
           </div>
         </header>
 
         {(!configured || error || !writable) && (
-          <div className="border-2 border-black bg-[#f3d85a] px-3 py-2 text-xs font-black uppercase text-black">
+          <div className="border-2 border-black bg-warning px-3 py-2 text-xs font-black uppercase text-black">
             {error || 'Stream candidates are code-backed. Local edits save to src/data/streamCandidates.ts.'}
           </div>
         )}
 
         <section className="grid gap-2 border-2 border-black bg-white p-3 md:grid-cols-[1fr_220px_180px]">
           <input
-            className="h-9 border-2 border-black bg-white px-3 text-sm font-bold text-black outline-none focus:bg-[#f3d85a]"
+            className="h-9 border-2 border-black bg-white px-3 text-sm font-bold text-black outline-none focus:bg-warning"
             placeholder="Search"
             value={query}
             onChange={event => setQuery(event.target.value)}
           />
           <select
-            className="h-9 border-2 border-black bg-white px-3 text-sm font-bold text-black outline-none focus:bg-[#f3d85a]"
+            className="h-9 border-2 border-black bg-white px-3 text-sm font-bold text-black outline-none focus:bg-warning"
             value={categoryFilter}
             onChange={event => setCategoryFilter(event.target.value)}
           >
@@ -349,7 +349,7 @@ export function StreamCandidateTable() {
             ))}
           </select>
           <select
-            className="h-9 border-2 border-black bg-white px-3 text-sm font-bold text-black outline-none focus:bg-[#f3d85a]"
+            className="h-9 border-2 border-black bg-white px-3 text-sm font-bold text-black outline-none focus:bg-warning"
             value={statusFilter}
             onChange={event => setStatusFilter(event.target.value as StreamReviewStatus | 'all')}
           >
@@ -362,7 +362,7 @@ export function StreamCandidateTable() {
 
         <div className="overflow-x-auto border-2 border-black bg-white">
           <table className="w-full min-w-[2370px] border-collapse text-left text-xs">
-            <thead className="sticky top-0 z-10 bg-[#f2f0e8] text-[10px] font-black uppercase text-black/60">
+            <thead className="sticky top-0 z-10 bg-soft text-[10px] font-black uppercase text-black/60">
               <tr>
                 <th className="w-[170px] border-b-2 border-r border-black px-2 py-2">Audition</th>
                 <th className="w-[210px] border-b-2 border-r border-black px-2 py-2">Status</th>
@@ -380,7 +380,7 @@ export function StreamCandidateTable() {
             </thead>
             <tbody>
               {visibleCandidates.map(candidate => (
-                <tr key={candidate.id} className="border-b border-black align-top hover:bg-[#f7f1cf]">
+                <tr key={candidate.id} className="border-b border-black align-top hover:bg-highlight">
                   <td className="border-r border-black px-2 py-2">
                     <AuditionCell candidate={candidate} />
                   </td>
@@ -428,7 +428,7 @@ export function StreamCandidateTable() {
                     />
                   </td>
                   <td className="border-r border-black px-2 py-2">
-                    <span className="flex h-8 items-center whitespace-nowrap border-2 border-black bg-[#f2f0e8] px-2 font-mono text-[12px] font-black text-black">
+                    <span className="flex h-8 items-center whitespace-nowrap border-2 border-black bg-soft px-2 font-mono text-[12px] font-black text-black">
                       {formatLocalTime(now, candidate.timeZone || getDefaultTimeZoneForLocation(candidate.location)) || '--'}
                     </span>
                   </td>
@@ -466,7 +466,7 @@ export function StreamCandidateTable() {
                   </td>
                   <td className="border-r border-black px-2 py-2">
                     <textarea
-                      className="min-h-16 w-full resize-y border-2 border-black bg-white px-2 py-1.5 text-black outline-none focus:bg-[#f3d85a]"
+                      className="min-h-16 w-full resize-y border-2 border-black bg-white px-2 py-1.5 text-black outline-none focus:bg-warning"
                       value={candidate.notes}
                       disabled={!writable}
                       onChange={event => updateCandidate(candidate.id, { notes: event.target.value })}

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { StreamSelector } from './components/StreamSelector';
 import { SourceBackdrop } from './components/SourceBackdrop';
 import { Keyboard } from './components/Keyboard';
@@ -8,6 +8,7 @@ import { Controls } from './components/Controls';
 import { MidiPanel } from './components/MidiPanel';
 import { WebRTCPanel } from './components/WebRTCPanel';
 import { SettingsPanel } from './components/SettingsPanel';
+import { Panel } from './components/ui';
 import { midiService } from './services/MidiService';
 import { audioEngine } from './services/AudioEngine';
 import { getSavedState, getKeyboardVolume, getChordPadVolume } from './services/storage';
@@ -16,9 +17,9 @@ import type { LiveSource } from './services/streams';
 
 type PanelKey = 'sources' | 'mixer' | 'keyboard' | 'chords' | 'io' | 'settings';
 
-const DEFAULT_DEMO_SOURCE_IDS = ['locus-seoul-gusan', 'locus-jasper-ridge'];
+const DEFAULT_DEMO_SOURCE_IDS = ['locus-usti-nad-labem-duul', 'locus-jasper-ridge'];
 const DEFAULT_DEMO_STREAM_SETTINGS: Record<string, Partial<StreamSettings>> = {
-  'locus-seoul-gusan': {
+  'locus-usti-nad-labem-duul': {
     filterQ: 46,
     volume: 14.87,
     pan: -0.34,
@@ -31,40 +32,6 @@ const DEFAULT_DEMO_STREAM_SETTINGS: Record<string, Partial<StreamSettings>> = {
     octaveShift: 0,
   },
 };
-
-interface PanelProps {
-  title: string;
-  label: string;
-  open: boolean;
-  onToggle: () => void;
-  children: ReactNode;
-  meta?: ReactNode;
-  className?: string;
-  bodyClassName?: string;
-}
-
-function Panel({ title, label, open, onToggle, children, meta, className = '', bodyClassName = '' }: PanelProps) {
-  return (
-    <section className={`w-full border border-[#242424] bg-[#fbfaf6] ${className}`}>
-      <button
-        type="button"
-        className="flex w-full items-center justify-between gap-3 border-b border-[#242424] bg-[#eeece3] px-3 py-2 text-left text-[11px] font-semibold uppercase text-[#171717] hover:bg-[#242424] hover:text-[#fbfaf6]"
-        onClick={onToggle}
-        aria-expanded={open}
-      >
-        <span className="flex min-w-0 items-center gap-3">
-          <span className="min-w-8 font-mono text-[10px] font-semibold">{label}</span>
-          <span className="truncate">{title}</span>
-        </span>
-        <span className="flex shrink-0 items-center gap-2 font-mono text-[10px] font-semibold">
-          {meta}
-          <span>{open ? 'Close' : 'Open'}</span>
-        </span>
-      </button>
-      {open && <div className={`p-3 ${bodyClassName}`}>{children}</div>}
-    </section>
-  );
-}
 
 function App() {
   const savedStateOnLoadRef = useRef(getSavedState());
@@ -117,19 +84,19 @@ function App() {
 
   if (!started) {
     return (
-      <div className="instrument-ui flex min-h-screen flex-col items-center justify-center gap-6 bg-[#ebe8de] px-4 text-[#171717]">
-        <div className="border border-[#242424] bg-[#fbfaf6] px-8 py-7 text-center">
+      <div className="instrument-ui flex min-h-screen flex-col items-center justify-center gap-6 bg-ground px-4 text-copy">
+        <div className="border border-ink bg-paper px-8 py-7 text-center">
           <h1 className="brand-title text-4xl leading-none">Cicada</h1>
         </div>
         <button
           onClick={handleStart}
           disabled={loading}
-          className="border border-[#242424] bg-[#fbfaf6] px-8 py-3 text-sm font-semibold uppercase text-[#171717] hover:bg-[#242424] hover:text-[#fbfaf6] disabled:cursor-wait disabled:opacity-50"
+          className="border border-ink bg-paper px-8 py-3 text-sm font-semibold uppercase text-copy hover:bg-ink hover:text-paper disabled:cursor-wait disabled:opacity-50"
         >
           {loading ? 'Connecting...' : hasSavedStreams ? 'Resume Session' : 'Start'}
         </button>
         {hasSavedStreams > 0 && !loading && (
-          <p className="text-[11px] font-semibold uppercase text-[#66635d]">{hasSavedStreams} saved source{hasSavedStreams > 1 ? 's' : ''} will reconnect</p>
+          <p className="text-[11px] font-semibold uppercase text-muted-strong">{hasSavedStreams} saved source{hasSavedStreams > 1 ? 's' : ''} will reconnect</p>
         )}
       </div>
     );
@@ -138,17 +105,17 @@ function App() {
   const shouldEqualizeTopPanels = openPanels.sources && openPanels.keyboard;
 
   return (
-    <div className="instrument-ui relative min-h-screen bg-[#ebe8de] text-[#171717]">
+    <div className="instrument-ui relative min-h-screen bg-ground text-copy">
       <SourceBackdrop activeIds={activeSourceIds} sources={availableSources} />
 
-      <main className="mx-auto flex max-w-[1120px] flex-col gap-3 px-4 pb-4">
-        <div className="sticky top-0 z-30 -mx-4 border-b border-[#242424] bg-[#ebe8de]/95 px-4 py-3 backdrop-blur">
-          <header className="grid gap-2 md:grid-cols-[auto_minmax(280px,1fr)] md:items-end">
-            <h1 className="brand-title text-3xl leading-none text-[#171717] md:text-5xl">Cicada</h1>
-            <Visualizer />
-          </header>
-        </div>
+      <div className="sticky top-0 z-30 border-b border-ink bg-ground/95 backdrop-blur">
+        <header className="mx-auto grid max-w-[1120px] gap-2 px-4 py-3 md:grid-cols-[auto_minmax(280px,1fr)] md:items-end">
+          <h1 className="brand-title text-3xl leading-none text-copy md:text-5xl">Cicada</h1>
+          <Visualizer />
+        </header>
+      </div>
 
+      <main className="mx-auto flex max-w-[1120px] flex-col gap-3 px-4 pb-4 pt-3">
         <div className={`flex flex-col gap-3 lg:flex-row ${shouldEqualizeTopPanels ? 'lg:items-stretch' : 'lg:items-start'}`}>
           <div className="flex lg:w-[340px] lg:shrink-0">
             <Panel

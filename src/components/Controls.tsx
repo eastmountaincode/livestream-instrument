@@ -30,7 +30,7 @@ const MIN_EQ_FREQ = 20;
 const MAX_EQ_FREQ = 20000;
 
 const TRACK_KNOB_CC_GROUPS = [
-  [1, 20, 70],
+  [20, 70],
   [2, 21, 71],
   [3, 22, 72],
   [4, 23, 73],
@@ -226,12 +226,12 @@ function StreamControls({
             <span className="shrink-0 text-[10px] font-bold uppercase text-black/50">{source.location}</span>
           )}
           {localTime && (
-            <span className="sc-value shrink-0 border border-black bg-[#f2f0e8] px-1.5 py-0.5 text-[10px] font-black text-black">
+            <span className="sc-value shrink-0 border border-black bg-soft px-1.5 py-0.5 text-[10px] font-black text-black">
               {localTime}
             </span>
           )}
           {categoryLabel && (
-            <span className="sc-value shrink-0 rounded-full border border-black bg-[#f2f0e8] px-2 py-0.5 text-[10px] font-black text-black">
+            <span className="sc-value shrink-0 rounded-full border border-black bg-soft px-2 py-0.5 text-[10px] font-black text-black">
               {categoryLabel}
             </span>
           )}
@@ -349,7 +349,7 @@ function StreamControls({
         <button
           className={`h-7 w-7 shrink-0 border-2 font-mono text-[10px] font-black ${
             muted
-              ? 'border-black bg-[#f3d85a] text-black'
+              ? 'border-black bg-warning text-black'
               : 'border-black bg-white text-black hover:bg-black hover:text-white'
           }`}
           onClick={() => {

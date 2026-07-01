@@ -2,6 +2,7 @@
   "name": "live-stream-instrument",
   "private": true,
   "version": "0.0.0",
+  "description": "Cicada is a browser-based instrument that uses environmental audio as raw material, surfacing pitches already present in live streams from the Locus Sonus project.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

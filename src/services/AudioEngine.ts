@@ -20,6 +20,9 @@ const ATTACK = 0.02;
 const RELEASE = 0.3;
 const FADE_TIME = 0.5;
 const VOICE_GAIN_BOOST = 8.0;
+const MIN_FILTER_FREQ = 20;
+const KEEPALIVE_GAIN = 0.000001;
+const KEEPALIVE_FREQ = 20;
 
 interface Voice {
   note: number;
@@ -69,6 +72,9 @@ export class AudioEngine {
   private channels: Map<string, StreamChannel> = new Map();
   private activeNotes: Map<number, ActiveNoteState> = new Map();
   private externalClock = false;
+  private pitchBendSemitones = 0;
+  private keepAliveOscillator: OscillatorNode | null = null;
+  private keepAliveGain: GainNode | null = null;
 
   constructor() {
     this.ctx = new AudioContext();
@@ -88,6 +94,22 @@ export class AudioEngine {
     this.masterGain.connect(this.compressor);
     this.compressor.connect(this.analyser);
     this.analyser.connect(this.ctx.destination);
+  }
+
+  private ensureKeepAlive() {
+    if (this.keepAliveOscillator) return;
+
+    const oscillator = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    oscillator.type = 'sine';
+    oscillator.frequency.value = KEEPALIVE_FREQ;
+    gain.gain.value = KEEPALIVE_GAIN;
+    oscillator.connect(gain);
+    gain.connect(this.ctx.destination);
+    oscillator.start();
+
+    this.keepAliveOscillator = oscillator;
+    this.keepAliveGain = gain;
   }
 
   // --- Stream management ---
@@ -249,6 +271,24 @@ export class AudioEngine {
     }
   }
 
+  private clampFilterFrequency(freq: number): number {
+    const maxFrequency = Math.max(MIN_FILTER_FREQ, Math.min(20000, this.ctx.sampleRate / 2 - 1));
+    return Number.isFinite(freq) ? Math.max(MIN_FILTER_FREQ, Math.min(maxFrequency, freq)) : 440;
+  }
+
+  private getVoiceFrequency(ch: StreamChannel, note: number): number {
+    return this.clampFilterFrequency(noteToFreq(note + ch.octaveShift * 12 + this.pitchBendSemitones));
+  }
+
+  private retuneActiveVoices(timeConstant = 0.005) {
+    const now = this.ctx.currentTime;
+    for (const [, ch] of this.channels) {
+      for (const [note, voice] of ch.activeVoices) {
+        voice.filter.frequency.setTargetAtTime(this.getVoiceFrequency(ch, note), now, timeConstant);
+      }
+    }
+  }
+
   private noteOnForChannel(ch: StreamChannel, note: number, velocity: number) {
     if (ch.activeVoices.has(note)) return;
 
@@ -264,8 +304,7 @@ export class AudioEngine {
       }
     }
 
-    const shiftedNote = note + ch.octaveShift * 12;
-    const freq = noteToFreq(shiftedNote);
+    const freq = this.getVoiceFrequency(ch, note);
     const now = this.ctx.currentTime;
     const velGain = this.velocityToGain(velocity);
 
@@ -407,13 +446,13 @@ export class AudioEngine {
   }
 
   private clampHighPassFrequency(freq: number): number {
-    const maxFrequency = Math.max(20, Math.min(20000, this.ctx.sampleRate / 2 - 1));
-    return Number.isFinite(freq) ? Math.max(20, Math.min(maxFrequency, freq)) : DEFAULT_HIGH_PASS_FREQ;
+    const maxFrequency = Math.max(MIN_FILTER_FREQ, Math.min(20000, this.ctx.sampleRate / 2 - 1));
+    return Number.isFinite(freq) ? Math.max(MIN_FILTER_FREQ, Math.min(maxFrequency, freq)) : DEFAULT_HIGH_PASS_FREQ;
   }
 
   private clampLowPassFrequency(freq: number): number {
-    const maxFrequency = Math.max(20, Math.min(20000, this.ctx.sampleRate / 2 - 1));
-    return Number.isFinite(freq) ? Math.max(20, Math.min(maxFrequency, freq)) : DEFAULT_LOW_PASS_FREQ;
+    const maxFrequency = Math.max(MIN_FILTER_FREQ, Math.min(20000, this.ctx.sampleRate / 2 - 1));
+    return Number.isFinite(freq) ? Math.max(MIN_FILTER_FREQ, Math.min(maxFrequency, freq)) : DEFAULT_LOW_PASS_FREQ;
   }
 
   setStreamHighPass(id: string, freq: number) {
@@ -488,16 +527,20 @@ export class AudioEngine {
     const ch = this.channels.get(id);
     if (!ch) return;
     ch.octaveShift = shift;
-    // Update frequencies of any currently active voices
-    const now = this.ctx.currentTime;
-    for (const [note, voice] of ch.activeVoices) {
-      const freq = noteToFreq(note + ch.octaveShift * 12);
-      voice.filter.frequency.setTargetAtTime(freq, now, 0.001);
-    }
+    this.retuneActiveVoices(0.001);
   }
 
   getStreamOctave(id: string): number {
     return this.channels.get(id)?.octaveShift ?? 0;
+  }
+
+  setPitchBendSemitones(semitones: number) {
+    this.pitchBendSemitones = Number.isFinite(semitones) ? Math.max(-24, Math.min(24, semitones)) : 0;
+    this.retuneActiveVoices(0.005);
+  }
+
+  getPitchBendSemitones(): number {
+    return this.pitchBendSemitones;
   }
 
   // --- Global controls (kept for backwards compat) ---
@@ -536,6 +579,7 @@ export class AudioEngine {
   }
 
   resume() {
+    this.ensureKeepAlive();
     return this.ctx.resume();
   }
 }

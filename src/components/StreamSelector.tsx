@@ -5,6 +5,7 @@ import { fetchAcceptedLiveSources, getOrcasoundStreamUrl } from '../services/str
 import type { LiveSource } from '../services/streams';
 import { saveActiveStreams, getSavedState, getStreamSettings, saveStreamSettings } from '../services/storage';
 import type { StreamSettings } from '../services/storage';
+import { Badge } from './ui';
 
 interface Props {
   onConnected: () => void;
@@ -27,16 +28,30 @@ interface ActiveStream {
   lastProgressAt: number;
   lastCurrentTime: number;
   lastReconnectAt: number;
+  reconnectAttempt: number;
+  hadSuccessfulPlayback: boolean;
+  usingProxyFallback: boolean;
 }
 
 const SOURCE_LOAD_RETRIES = 3;
 const SOURCE_LOAD_RETRY_DELAY_MS = 700;
-const STREAM_WATCHDOG_INTERVAL_MS = 5_000;
-const STREAM_STALL_TIMEOUT_MS = 20_000;
+const STREAM_WATCHDOG_INTERVAL_MS = 10_000;
+const STREAM_STALL_TIMEOUT_MS = 60_000;
 const STREAM_RECONNECT_DELAY_MS = 1_200;
 const STREAM_RECONNECT_COOLDOWN_MS = 15_000;
+const STREAM_RECONNECT_STABLE_RESET_MS = 60_000;
+const STREAM_MAX_RECONNECT_ATTEMPTS = 3;
+const STREAM_MAX_RECONNECT_BACKOFF_MS = 60_000;
 const LIVE_EDGE_DRIFT_SECONDS = 20;
 const MAX_HLS_RECOVERIES_BEFORE_RECONNECT = 5;
+
+interface ConnectOptions {
+  reconnect?: boolean;
+  reconnectAttempt?: number;
+  lastReconnectAt?: number;
+  hadSuccessfulPlayback?: boolean;
+  useProxyFallback?: boolean;
+}
 
 function groupSourcesByCategory(sources: LiveSource[]): [string, LiveSource[]][] {
   const groups = new Map<string, LiveSource[]>();
@@ -135,6 +150,15 @@ export function StreamSelector({
     }
   }, [activeIds, onActiveChange]);
 
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) return;
+    navigator.mediaSession.playbackState = activeIds.size > 0 ? 'playing' : 'none';
+
+    return () => {
+      navigator.mediaSession.playbackState = 'none';
+    };
+  }, [activeIds.size]);
+
   const cleanupActiveStream = useCallback((sourceId: string, removeAudioChannel = true) => {
     const stream = activeStreams.current.get(sourceId);
     if (!stream) {
@@ -175,7 +199,7 @@ export function StreamSelector({
     return () => onRemoveSourceReady?.(() => undefined);
   }, [disconnect, onRemoveSourceReady]);
 
-  const connect = useCallback(async (source: LiveSource, options: { reconnect?: boolean } = {}) => {
+  const connect = useCallback(async (source: LiveSource, options: ConnectOptions = {}) => {
     if (activeStreams.current.has(source.id) && !options.reconnect) return;
 
     if (options.reconnect) {
@@ -203,39 +227,104 @@ export function StreamSelector({
       ready: false,
       lastProgressAt: Date.now(),
       lastCurrentTime: 0,
-      lastReconnectAt: 0,
+      lastReconnectAt: options.lastReconnectAt ?? 0,
+      reconnectAttempt: options.reconnectAttempt ?? 0,
+      hadSuccessfulPlayback: options.hadSuccessfulPlayback ?? false,
+      usingProxyFallback: options.useProxyFallback ?? false,
     };
     activeStreams.current.set(source.id, stream);
 
     const isCurrentStream = () => activeStreams.current.get(source.id) === stream;
 
-    const rememberProgress = () => {
+    const rememberPlaybackProgress = () => {
       if (!isCurrentStream()) return;
-      stream.lastProgressAt = Date.now();
+      const now = Date.now();
+      stream.lastProgressAt = now;
       stream.lastCurrentTime = audio.currentTime;
+      setLoadingIds(prev => {
+        if (!prev.has(source.id)) return prev;
+        const next = new Set(prev);
+        next.delete(source.id);
+        return next;
+      });
+      setErrors(prev => {
+        if (!prev.has(source.id)) return prev;
+        const next = new Map(prev);
+        next.delete(source.id);
+        return next;
+      });
+
+      if (
+        stream.reconnectAttempt > 0 &&
+        stream.lastReconnectAt &&
+        now - stream.lastReconnectAt >= STREAM_RECONNECT_STABLE_RESET_MS
+      ) {
+        stream.reconnectAttempt = 0;
+        stream.lastReconnectAt = 0;
+      }
+    };
+
+    const failStream = (msg: string) => {
+      if (!isCurrentStream()) return;
+      cleanupActiveStream(source.id);
+      setLoadingIds(prev => {
+        const next = new Set(prev);
+        next.delete(source.id);
+        return next;
+      });
+      setActiveIds(prev => {
+        const next = new Set(prev);
+        next.delete(source.id);
+        return next;
+      });
+      setErrors(prev => new Map(prev).set(source.id, msg));
     };
 
     const scheduleReconnect = (reason: string, delayMs = STREAM_RECONNECT_DELAY_MS) => {
       if (!isCurrentStream() || stream.reconnectTimerId) return;
 
+      const nextReconnectAttempt = stream.reconnectAttempt + 1;
+      if (!stream.hadSuccessfulPlayback && nextReconnectAttempt > STREAM_MAX_RECONNECT_ATTEMPTS) {
+        failStream(`${source.name} unavailable after ${STREAM_MAX_RECONNECT_ATTEMPTS} reconnect attempts`);
+        return;
+      }
+
       const cooldownRemaining = stream.lastReconnectAt
         ? Math.max(0, STREAM_RECONNECT_COOLDOWN_MS - (Date.now() - stream.lastReconnectAt))
         : 0;
-      const reconnectDelay = Math.max(delayMs, cooldownRemaining);
+      const backoffStep = Math.min(Math.max(0, nextReconnectAttempt - 1), 6);
+      const backoffDelay = Math.min(
+        STREAM_MAX_RECONNECT_BACKOFF_MS,
+        Math.round(delayMs * 2 ** backoffStep)
+      );
+      const reconnectDelay = Math.max(backoffDelay, cooldownRemaining);
+      const retryLabel = stream.hadSuccessfulPlayback && nextReconnectAttempt > STREAM_MAX_RECONNECT_ATTEMPTS
+        ? 'retrying'
+        : `${nextReconnectAttempt}/${STREAM_MAX_RECONNECT_ATTEMPTS}`;
 
       setLoadingIds(prev => new Set(prev).add(source.id));
-      setErrors(prev => new Map(prev).set(source.id, reason));
+      setErrors(prev => new Map(prev).set(
+        source.id,
+        `${reason} (${retryLabel})`
+      ));
       stream.reconnectTimerId = window.setTimeout(() => {
         stream.reconnectTimerId = undefined;
         if (!isCurrentStream()) return;
-        stream.lastReconnectAt = Date.now();
+        const lastReconnectAt = Date.now();
+        stream.lastReconnectAt = lastReconnectAt;
         console.warn(`Recovering stream ${source.id}: ${reason}`);
-        void connect(stream.source, { reconnect: true });
+        void connect(stream.source, {
+          reconnect: true,
+          reconnectAttempt: nextReconnectAttempt,
+          lastReconnectAt,
+          hadSuccessfulPlayback: stream.hadSuccessfulPlayback,
+          useProxyFallback: stream.usingProxyFallback,
+        });
       }, reconnectDelay);
     };
 
     const startPlayback = () => {
-      void audio.play().then(rememberProgress).catch(() => {
+      void audio.play().then(rememberPlaybackProgress).catch(() => {
         scheduleReconnect('Restarting stream playback');
       });
     };
@@ -243,6 +332,7 @@ export function StreamSelector({
     const onReady = () => {
       if (!isCurrentStream() || stream.ready) return;
       stream.ready = true;
+      stream.hadSuccessfulPlayback = true;
       audioEngine.addStream(source.id, audio);
       const savedSettings = getStreamSettings(source.id);
       const defaultSettings = defaultStreamSettings[source.id];
@@ -275,72 +365,93 @@ export function StreamSelector({
       onConnected();
     };
 
-    const onError = (msg: string) => {
-      if (!isCurrentStream()) return;
-      cleanupActiveStream(source.id);
-      setLoadingIds(prev => {
-        const next = new Set(prev);
-        next.delete(source.id);
-        return next;
-      });
-      setErrors(prev => new Map(prev).set(source.id, msg));
-      setTimeout(() => {
-        setErrors(prev => {
-          const next = new Map(prev);
-          next.delete(source.id);
-          return next;
-        });
-      }, 5000);
-    };
-
     try {
+      const tryProxyFallback = () => {
+        if (!source.proxyUrl || stream.usingProxyFallback || stream.ready) return false;
+
+        setErrors(prev => new Map(prev).set(source.id, 'Trying proxy fallback'));
+        void connect(source, {
+          reconnect: true,
+          reconnectAttempt: stream.reconnectAttempt,
+          lastReconnectAt: stream.lastReconnectAt,
+          hadSuccessfulPlayback: stream.hadSuccessfulPlayback,
+          useProxyFallback: true,
+        });
+        return true;
+      };
+
       const onMediaFailure = () => {
+        if (tryProxyFallback()) return;
         scheduleReconnect('Reconnecting stream');
+      };
+      const onMediaPause = () => {
+        if (!isCurrentStream() || !stream.ready) return;
+        startPlayback();
       };
       const onWaiting = () => {
         stream.lastProgressAt = Math.min(stream.lastProgressAt, Date.now() - STREAM_STALL_TIMEOUT_MS);
       };
       const onRecoverySignal = () => {
         if (!isCurrentStream()) return;
-        void audioEngine.resume();
+        void audioEngine.resume().catch(() => undefined);
         stream.hls?.startLoad();
-        if (audio.paused || audio.ended) startPlayback();
+        if (audio.paused || audio.ended) {
+          startPlayback();
+          return;
+        }
+
+        const timeIsAdvancing = Math.abs(audio.currentTime - stream.lastCurrentTime) > 0.05;
+        if (timeIsAdvancing) {
+          rememberPlaybackProgress();
+          return;
+        }
+
+        const stalledFor = Date.now() - stream.lastProgressAt;
+        if (stream.ready && stalledFor >= STREAM_STALL_TIMEOUT_MS) {
+          scheduleReconnect(`Recovering inactive stream after ${Math.round(stalledFor / 1000)}s`, 0);
+        }
       };
 
-      audio.addEventListener('playing', rememberProgress);
-      audio.addEventListener('timeupdate', rememberProgress);
-      audio.addEventListener('progress', rememberProgress);
-      audio.addEventListener('loadeddata', rememberProgress);
-      audio.addEventListener('canplay', rememberProgress);
+      audio.addEventListener('playing', rememberPlaybackProgress);
+      audio.addEventListener('timeupdate', rememberPlaybackProgress);
+      audio.addEventListener('loadeddata', rememberPlaybackProgress);
+      audio.addEventListener('canplay', rememberPlaybackProgress);
       audio.addEventListener('waiting', onWaiting);
       audio.addEventListener('stalled', onWaiting);
+      audio.addEventListener('pause', onMediaPause);
       audio.addEventListener('ended', onMediaFailure);
       audio.addEventListener('error', onMediaFailure);
       document.addEventListener('visibilitychange', onRecoverySignal);
       document.addEventListener('pointerdown', onRecoverySignal);
       document.addEventListener('keydown', onRecoverySignal);
+      document.addEventListener('resume', onRecoverySignal);
       window.addEventListener('focus', onRecoverySignal);
+      window.addEventListener('online', onRecoverySignal);
+      window.addEventListener('pageshow', onRecoverySignal);
 
       stream.cleanup = () => {
-        audio.removeEventListener('playing', rememberProgress);
-        audio.removeEventListener('timeupdate', rememberProgress);
-        audio.removeEventListener('progress', rememberProgress);
-        audio.removeEventListener('loadeddata', rememberProgress);
-        audio.removeEventListener('canplay', rememberProgress);
+        audio.removeEventListener('playing', rememberPlaybackProgress);
+        audio.removeEventListener('timeupdate', rememberPlaybackProgress);
+        audio.removeEventListener('loadeddata', rememberPlaybackProgress);
+        audio.removeEventListener('canplay', rememberPlaybackProgress);
         audio.removeEventListener('waiting', onWaiting);
         audio.removeEventListener('stalled', onWaiting);
+        audio.removeEventListener('pause', onMediaPause);
         audio.removeEventListener('ended', onMediaFailure);
         audio.removeEventListener('error', onMediaFailure);
         document.removeEventListener('visibilitychange', onRecoverySignal);
         document.removeEventListener('pointerdown', onRecoverySignal);
         document.removeEventListener('keydown', onRecoverySignal);
+        document.removeEventListener('resume', onRecoverySignal);
         window.removeEventListener('focus', onRecoverySignal);
+        window.removeEventListener('online', onRecoverySignal);
+        window.removeEventListener('pageshow', onRecoverySignal);
       };
 
       stream.watchdogId = window.setInterval(() => {
         if (!isCurrentStream() || !stream.ready) return;
 
-        void audioEngine.resume();
+        void audioEngine.resume().catch(() => undefined);
 
         const liveSyncPosition = stream.hls?.liveSyncPosition;
         if (
@@ -349,7 +460,7 @@ export function StreamSelector({
           liveSyncPosition - audio.currentTime > LIVE_EDGE_DRIFT_SECONDS
         ) {
           audio.currentTime = liveSyncPosition;
-          rememberProgress();
+          rememberPlaybackProgress();
           stream.hls?.startLoad();
         }
 
@@ -361,7 +472,7 @@ export function StreamSelector({
         const stalledFor = Date.now() - stream.lastProgressAt;
         const timeIsAdvancing = Math.abs(audio.currentTime - stream.lastCurrentTime) > 0.05;
         if (timeIsAdvancing) {
-          rememberProgress();
+          rememberPlaybackProgress();
           return;
         }
 
@@ -380,9 +491,9 @@ export function StreamSelector({
             liveMaxLatencyDurationCount: 12,
             maxBufferLength: 60,
             backBufferLength: 30,
-            manifestLoadingMaxRetry: 999,
-            levelLoadingMaxRetry: 999,
-            fragLoadingMaxRetry: 999,
+            manifestLoadingMaxRetry: 3,
+            levelLoadingMaxRetry: 3,
+            fragLoadingMaxRetry: 3,
             manifestLoadingRetryDelay: 1000,
             levelLoadingRetryDelay: 1000,
             fragLoadingRetryDelay: 1000,
@@ -392,8 +503,6 @@ export function StreamSelector({
           hls.loadSource(hlsUrl);
           hls.attachMedia(audio);
           hls.once(Hls.Events.MANIFEST_PARSED, onReady);
-          hls.on(Hls.Events.FRAG_LOADED, rememberProgress);
-          hls.on(Hls.Events.LEVEL_LOADED, rememberProgress);
 
           let retryCount = 0;
           hls.on(Hls.Events.ERROR, async (_event, data) => {
@@ -429,17 +538,17 @@ export function StreamSelector({
           audio.addEventListener('canplay', onReady, { once: true });
           audio.load();
         } else {
-          onError('HLS is not supported in this browser');
+          failStream('HLS is not supported in this browser');
         }
       } else if (source.url) {
-        audio.src = source.url;
+        audio.src = stream.usingProxyFallback && source.proxyUrl ? source.proxyUrl : source.url;
         audio.addEventListener('canplay', onReady, { once: true });
         audio.load();
       } else {
-        onError('Source does not have a playable stream URL');
+        failStream('Source does not have a playable stream URL');
       }
     } catch (err) {
-      onError(String(err));
+      failStream(String(err));
     }
   }, [cleanupActiveStream, defaultStreamSettings, onConnected]);
 
@@ -471,11 +580,11 @@ export function StreamSelector({
       <div className="max-h-[176px] overflow-y-auto pr-1">
         <div className="flex flex-col gap-2">
         {!sourcesReady && (
-          <div className="border border-[#242424] bg-[#fbfaf6] px-2 py-1 text-[11px] font-semibold uppercase text-[#68645c]">Loading Approved Stream Sources...</div>
+          <div className="border border-ink bg-paper px-2 py-1 text-[11px] font-semibold uppercase text-muted">Loading Approved Stream Sources...</div>
         )}
         {groupedSources.map(([category, categorySources]) => (
           <div key={category} className="grid gap-1">
-            <span className="text-[10px] font-semibold uppercase text-[#68645c]">{category}</span>
+            <span className="text-[10px] font-semibold uppercase text-muted">{category}</span>
             <div className="grid gap-1">
             {categorySources.map(source => {
               const localTime = formatLocalTime(clock, source.timeZone);
@@ -486,15 +595,15 @@ export function StreamSelector({
                   key={source.id}
                   className={`grid min-h-8 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 border px-2 py-1.5 text-left font-mono text-[10px] font-semibold uppercase ${
                     active
-                      ? 'border-[#242424] bg-[#242424] text-[#fbfaf6]'
-                      : 'border-[#242424] bg-[#fbfaf6] text-[#171717] hover:bg-[#eeece3]'
+                      ? 'border-ink bg-ink text-paper'
+                      : 'border-ink bg-paper text-copy hover:bg-surface'
                   }`}
                   onClick={() => toggle(source)}
                   title={`${source.description}\n${source.location}${localTime ? `\nLocal time: ${localTime}` : ''}`}
                 >
                   <span className="min-w-0 whitespace-normal break-words leading-tight">{source.name}</span>
                   {localTime && (
-                    <span className={active ? 'shrink-0 border border-[#fbfaf6] px-1.5 py-0.5 text-[9px] text-[#fbfaf6]' : 'shrink-0 border border-[#242424] px-1.5 py-0.5 text-[9px] text-[#171717]'}>
+                    <span className={active ? 'shrink-0 border border-paper px-1.5 py-0.5 text-[9px] text-paper' : 'shrink-0 border border-ink px-1.5 py-0.5 text-[9px] text-copy'}>
                       {localTime}
                     </span>
                   )}
@@ -506,15 +615,15 @@ export function StreamSelector({
         ))}
         </div>
       </div>
-      <div className="flex min-h-[28px] flex-wrap gap-1 border-t border-[#242424] pt-2">
-        {sourceLoadError && <span className="border border-[#242424] bg-[#d8cfb7] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#171717]">{sourceLoadError}</span>}
+      <div className="flex min-h-[28px] flex-wrap gap-1 border-ink pt-2">
+        {sourceLoadError && <Badge tone="muted">{sourceLoadError}</Badge>}
         {sourcesReady && !sourceLoadError && sources.length === 0 && (
-          <span className="border border-[#242424] bg-[#d8cfb7] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#171717]">No Approved Stream Sources Loaded</span>
+          <Badge tone="muted">No Approved Stream Sources Loaded</Badge>
         )}
-        {loadingIds.size > 0 && <span className="border border-[#242424] bg-[#d8cfb7] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#171717]">Connecting...</span>}
-        {activeIds.size > 0 && <span className="border border-[#242424] bg-[#242424] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#fbfaf6]">{activeIds.size} Source{activeIds.size > 1 ? 's' : ''} Live</span>}
+        {loadingIds.size > 0 && <Badge tone="muted">Connecting...</Badge>}
+        {activeIds.size > 0 && <Badge tone="active">{activeIds.size} Source{activeIds.size > 1 ? 's' : ''} Live</Badge>}
         {Array.from(errors.entries()).map(([id, msg]) => (
-          <span key={id} className="border border-[#242424] bg-[#d6a19a] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#171717]">{msg}</span>
+          <Badge key={id} tone="error">{msg}</Badge>
         ))}
       </div>
     </div>

@@ -16,6 +16,7 @@ export interface LiveSource {
   hlsUrl?: string;
   // For Icecast streams
   url?: string;
+  proxyUrl?: string;
   pageUrl?: string;
   format?: string;
   source?: string;
@@ -65,6 +66,8 @@ export function candidateToLiveSource(candidate: StreamCandidate): LiveSource | 
     candidate.streamUrl.includes('.m3u8') ||
     candidate.format.toLowerCase().includes('hls')
   );
+  const streamProxyUrl = `/api/stream-preview?url=${encodeURIComponent(candidate.streamUrl)}`;
+
   return {
     id: candidate.id,
     name: candidate.name,
@@ -75,7 +78,8 @@ export function candidateToLiveSource(candidate: StreamCandidate): LiveSource | 
     timeZone: candidate.timeZone,
     latestTxtUrl: isLatestTxtHls ? candidate.streamUrl : undefined,
     hlsUrl: isDirectHls ? candidate.streamUrl : undefined,
-    url: isLatestTxtHls || isDirectHls ? undefined : `/api/stream-preview?url=${encodeURIComponent(candidate.streamUrl)}`,
+    url: isLatestTxtHls || isDirectHls ? undefined : candidate.streamUrl,
+    proxyUrl: isLatestTxtHls || isDirectHls ? undefined : streamProxyUrl,
     pageUrl: candidate.pageUrl,
     format: candidate.format,
     source: candidate.source,

@@ -1,5 +1,22 @@
 @import "tailwindcss";
 
+@theme {
+  --color-ink: #242424;
+  --color-ink-hover: #2a2a2a;
+  --color-copy: #171717;
+  --color-paper: #fbfaf6;
+  --color-ground: #ebe8de;
+  --color-surface: #eeece3;
+  --color-panel: #f3f1ea;
+  --color-soft: #f2f0e8;
+  --color-highlight: #f7f1cf;
+  --color-muted: #68645c;
+  --color-muted-strong: #66635d;
+  --color-accent: #d8cfb7;
+  --color-warning: #f3d85a;
+  --color-error: #d6a19a;
+}
+
 @font-face {
   font-family: "VaxenRounded";
   src: url("/fonts/VaxenRoundedVF.ttf") format("truetype");
@@ -18,8 +35,8 @@
   }
 
   body {
-    background: #ebe8de;
-    color: #171717;
+    background: var(--color-ground);
+    color: var(--color-copy);
     font-family: Helvetica, Arial, sans-serif;
     font-size: 13px;
     overscroll-behavior-y: none;
@@ -53,8 +70,8 @@ input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
   height: 12px;
-  background: #fbfaf6;
-  border: 1px solid #242424;
+  background: var(--color-paper);
+  border: 1px solid var(--color-ink);
   border-radius: 0;
   outline: none;
 }
@@ -65,37 +82,37 @@ input[type="range"]::-webkit-slider-thumb {
   width: 18px;
   height: 28px;
   border-radius: 0;
-  background: #242424;
+  background: var(--color-ink);
   cursor: pointer;
-  border: 1px solid #242424;
+  border: 1px solid var(--color-ink);
 }
 
 input[type="range"]::-webkit-slider-thumb:hover {
-  background: #fbfaf6;
+  background: var(--color-paper);
 }
 
 input[type="range"]::-moz-range-thumb {
   width: 18px;
   height: 28px;
   border-radius: 0;
-  background: #242424;
+  background: var(--color-ink);
   cursor: pointer;
-  border: 1px solid #242424;
+  border: 1px solid var(--color-ink);
 }
 
 input[type="range"]::-moz-range-track {
   height: 12px;
-  background: #fbfaf6;
-  border: 1px solid #242424;
+  background: var(--color-paper);
+  border: 1px solid var(--color-ink);
   border-radius: 0;
 }
 
 .instrument-ui {
-  --ui-ink: #242424;
-  --ui-paper: #fbfaf6;
-  --ui-surface: #f3f1ea;
-  --ui-muted: #68645c;
-  --ui-accent: #d8cfb7;
+  --ui-ink: var(--color-ink);
+  --ui-paper: var(--color-paper);
+  --ui-surface: var(--color-panel);
+  --ui-muted: var(--color-muted);
+  --ui-accent: var(--color-accent);
 }
 
 .instrument-ui .border-2.border-black {

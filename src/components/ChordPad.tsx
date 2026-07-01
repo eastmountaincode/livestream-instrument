@@ -200,7 +200,7 @@ export function ChordPad({ streamConnected, inputVolume, autoPlayDefaultChord = 
               selectedRoot === semitone
                 ? 'border-black bg-black text-white'
                 : name.includes('#')
-                  ? 'border-black bg-black text-white hover:bg-[#2a2a2a]'
+                  ? 'border-black bg-black text-white hover:bg-ink-hover'
                   : 'border-black bg-white text-black hover:bg-black hover:text-white'
             }`}
             onClick={() => {
@@ -244,7 +244,7 @@ export function ChordPad({ streamConnected, inputVolume, autoPlayDefaultChord = 
 
       {/* Quick root+chord grid: all 12 roots as rows, common chords as columns */}
       <div className="border-2 border-black">
-        <div className="flex border-b-2 border-black bg-[#f2f0e8]">
+        <div className="flex border-b-2 border-black bg-soft">
           <span className="min-w-[36px] px-1 py-[3px] text-center text-[9px] font-black uppercase text-black/55">Quick</span>
           {['maj', 'min', 'maj7', 'min7', 'min9', 'min11', 'sus4'].map(type => (
             <span key={type} className="flex-1 px-0.5 py-[3px] text-center text-[9px] font-black text-black/60">{CHORD_TYPES[type].short || 'M'}</span>

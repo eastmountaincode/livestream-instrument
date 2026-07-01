@@ -1,5 +1,6 @@
 import { audioEngine } from '../services/AudioEngine';
 import { clearSavedState } from '../services/storage';
+import { UiButton } from './ui';
 
 export function SettingsPanel() {
   const clearHistory = () => {
@@ -11,13 +12,9 @@ export function SettingsPanel() {
 
   return (
     <div className="flex flex-wrap items-center gap-3">
-      <button
-        type="button"
-        className="border border-[#242424] bg-[#fbfaf6] px-3.5 py-[5px] font-mono text-[11px] font-semibold uppercase text-[#171717] hover:bg-[#242424] hover:text-[#fbfaf6]"
-        onClick={clearHistory}
-      >
+      <UiButton onClick={clearHistory}>
         Clear History
-      </button>
+      </UiButton>
     </div>
   );
 }
