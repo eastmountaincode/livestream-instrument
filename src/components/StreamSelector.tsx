@@ -17,11 +17,26 @@ interface Props {
 }
 
 interface ActiveStream {
+  source: LiveSource;
+  audio: HTMLAudioElement;
   hls?: Hls;
+  cleanup?: () => void;
+  reconnectTimerId?: number;
+  watchdogId?: number;
+  ready: boolean;
+  lastProgressAt: number;
+  lastCurrentTime: number;
+  lastReconnectAt: number;
 }
 
 const SOURCE_LOAD_RETRIES = 3;
 const SOURCE_LOAD_RETRY_DELAY_MS = 700;
+const STREAM_WATCHDOG_INTERVAL_MS = 5_000;
+const STREAM_STALL_TIMEOUT_MS = 20_000;
+const STREAM_RECONNECT_DELAY_MS = 1_200;
+const STREAM_RECONNECT_COOLDOWN_MS = 15_000;
+const LIVE_EDGE_DRIFT_SECONDS = 20;
+const MAX_HLS_RECOVERIES_BEFORE_RECONNECT = 5;
 
 function groupSourcesByCategory(sources: LiveSource[]): [string, LiveSource[]][] {
   const groups = new Map<string, LiveSource[]>();
@@ -120,26 +135,53 @@ export function StreamSelector({
     }
   }, [activeIds, onActiveChange]);
 
-  const disconnect = useCallback((sourceId: string) => {
-    audioEngine.removeStream(sourceId);
+  const cleanupActiveStream = useCallback((sourceId: string, removeAudioChannel = true) => {
     const stream = activeStreams.current.get(sourceId);
-    if (stream?.hls) {
-      stream.hls.destroy();
+    if (!stream) {
+      if (removeAudioChannel) audioEngine.removeStream(sourceId);
+      return;
     }
+
+    if (stream.reconnectTimerId) window.clearTimeout(stream.reconnectTimerId);
+    if (stream.watchdogId) window.clearInterval(stream.watchdogId);
+    stream.cleanup?.();
+    stream.hls?.destroy();
+    stream.audio.pause();
+    stream.audio.removeAttribute('src');
+    stream.audio.load();
+    if (removeAudioChannel) audioEngine.removeStream(sourceId);
     activeStreams.current.delete(sourceId);
+  }, []);
+
+  const disconnect = useCallback((sourceId: string) => {
+    cleanupActiveStream(sourceId);
     setActiveIds(prev => {
       const next = new Set(prev);
       next.delete(sourceId);
       return next;
     });
-  }, []);
+  }, [cleanupActiveStream]);
+
+  useEffect(() => {
+    return () => {
+      for (const sourceId of Array.from(activeStreams.current.keys())) {
+        cleanupActiveStream(sourceId);
+      }
+    };
+  }, [cleanupActiveStream]);
 
   useEffect(() => {
     onRemoveSourceReady?.(disconnect);
     return () => onRemoveSourceReady?.(() => undefined);
   }, [disconnect, onRemoveSourceReady]);
 
-  const connect = useCallback(async (source: LiveSource) => {
+  const connect = useCallback(async (source: LiveSource, options: { reconnect?: boolean } = {}) => {
+    if (activeStreams.current.has(source.id) && !options.reconnect) return;
+
+    if (options.reconnect) {
+      cleanupActiveStream(source.id);
+    }
+
     setLoadingIds(prev => new Set(prev).add(source.id));
     setErrors(prev => {
       const next = new Map(prev);
@@ -150,9 +192,57 @@ export function StreamSelector({
     await audioEngine.resume();
 
     const audio = new Audio();
+    audio.autoplay = true;
     audio.crossOrigin = 'anonymous';
+    audio.preload = 'auto';
+    audio.setAttribute('playsinline', 'true');
+
+    const stream: ActiveStream = {
+      source,
+      audio,
+      ready: false,
+      lastProgressAt: Date.now(),
+      lastCurrentTime: 0,
+      lastReconnectAt: 0,
+    };
+    activeStreams.current.set(source.id, stream);
+
+    const isCurrentStream = () => activeStreams.current.get(source.id) === stream;
+
+    const rememberProgress = () => {
+      if (!isCurrentStream()) return;
+      stream.lastProgressAt = Date.now();
+      stream.lastCurrentTime = audio.currentTime;
+    };
+
+    const scheduleReconnect = (reason: string, delayMs = STREAM_RECONNECT_DELAY_MS) => {
+      if (!isCurrentStream() || stream.reconnectTimerId) return;
+
+      const cooldownRemaining = stream.lastReconnectAt
+        ? Math.max(0, STREAM_RECONNECT_COOLDOWN_MS - (Date.now() - stream.lastReconnectAt))
+        : 0;
+      const reconnectDelay = Math.max(delayMs, cooldownRemaining);
+
+      setLoadingIds(prev => new Set(prev).add(source.id));
+      setErrors(prev => new Map(prev).set(source.id, reason));
+      stream.reconnectTimerId = window.setTimeout(() => {
+        stream.reconnectTimerId = undefined;
+        if (!isCurrentStream()) return;
+        stream.lastReconnectAt = Date.now();
+        console.warn(`Recovering stream ${source.id}: ${reason}`);
+        void connect(stream.source, { reconnect: true });
+      }, reconnectDelay);
+    };
+
+    const startPlayback = () => {
+      void audio.play().then(rememberProgress).catch(() => {
+        scheduleReconnect('Restarting stream playback');
+      });
+    };
 
     const onReady = () => {
+      if (!isCurrentStream() || stream.ready) return;
+      stream.ready = true;
       audioEngine.addStream(source.id, audio);
       const savedSettings = getStreamSettings(source.id);
       const defaultSettings = defaultStreamSettings[source.id];
@@ -175,7 +265,7 @@ export function StreamSelector({
         audioEngine.setStreamMuted(source.id, nextSettings.muted);
         saveStreamSettings(source.id, nextSettings);
       }
-      audio.play();
+      startPlayback();
       setLoadingIds(prev => {
         const next = new Set(prev);
         next.delete(source.id);
@@ -186,6 +276,8 @@ export function StreamSelector({
     };
 
     const onError = (msg: string) => {
+      if (!isCurrentStream()) return;
+      cleanupActiveStream(source.id);
       setLoadingIds(prev => {
         const next = new Set(prev);
         next.delete(source.id);
@@ -202,30 +294,118 @@ export function StreamSelector({
     };
 
     try {
+      const onMediaFailure = () => {
+        scheduleReconnect('Reconnecting stream');
+      };
+      const onWaiting = () => {
+        stream.lastProgressAt = Math.min(stream.lastProgressAt, Date.now() - STREAM_STALL_TIMEOUT_MS);
+      };
+      const onRecoverySignal = () => {
+        if (!isCurrentStream()) return;
+        void audioEngine.resume();
+        stream.hls?.startLoad();
+        if (audio.paused || audio.ended) startPlayback();
+      };
+
+      audio.addEventListener('playing', rememberProgress);
+      audio.addEventListener('timeupdate', rememberProgress);
+      audio.addEventListener('progress', rememberProgress);
+      audio.addEventListener('loadeddata', rememberProgress);
+      audio.addEventListener('canplay', rememberProgress);
+      audio.addEventListener('waiting', onWaiting);
+      audio.addEventListener('stalled', onWaiting);
+      audio.addEventListener('ended', onMediaFailure);
+      audio.addEventListener('error', onMediaFailure);
+      document.addEventListener('visibilitychange', onRecoverySignal);
+      document.addEventListener('pointerdown', onRecoverySignal);
+      document.addEventListener('keydown', onRecoverySignal);
+      window.addEventListener('focus', onRecoverySignal);
+
+      stream.cleanup = () => {
+        audio.removeEventListener('playing', rememberProgress);
+        audio.removeEventListener('timeupdate', rememberProgress);
+        audio.removeEventListener('progress', rememberProgress);
+        audio.removeEventListener('loadeddata', rememberProgress);
+        audio.removeEventListener('canplay', rememberProgress);
+        audio.removeEventListener('waiting', onWaiting);
+        audio.removeEventListener('stalled', onWaiting);
+        audio.removeEventListener('ended', onMediaFailure);
+        audio.removeEventListener('error', onMediaFailure);
+        document.removeEventListener('visibilitychange', onRecoverySignal);
+        document.removeEventListener('pointerdown', onRecoverySignal);
+        document.removeEventListener('keydown', onRecoverySignal);
+        window.removeEventListener('focus', onRecoverySignal);
+      };
+
+      stream.watchdogId = window.setInterval(() => {
+        if (!isCurrentStream() || !stream.ready) return;
+
+        void audioEngine.resume();
+
+        const liveSyncPosition = stream.hls?.liveSyncPosition;
+        if (
+          typeof liveSyncPosition === 'number' &&
+          Number.isFinite(liveSyncPosition) &&
+          liveSyncPosition - audio.currentTime > LIVE_EDGE_DRIFT_SECONDS
+        ) {
+          audio.currentTime = liveSyncPosition;
+          rememberProgress();
+          stream.hls?.startLoad();
+        }
+
+        if (audio.paused || audio.ended) {
+          startPlayback();
+          return;
+        }
+
+        const stalledFor = Date.now() - stream.lastProgressAt;
+        const timeIsAdvancing = Math.abs(audio.currentTime - stream.lastCurrentTime) > 0.05;
+        if (timeIsAdvancing) {
+          rememberProgress();
+          return;
+        }
+
+        if (stalledFor >= STREAM_STALL_TIMEOUT_MS) {
+          scheduleReconnect(`No media progress for ${Math.round(stalledFor / 1000)}s`);
+        }
+      }, STREAM_WATCHDOG_INTERVAL_MS);
+
       if (source.hlsUrl || source.latestTxtUrl || source.hlsNode) {
         const hlsUrl = source.hlsUrl || await getOrcasoundStreamUrl(source);
 
         if (Hls.isSupported()) {
           const hls = new Hls({
+            lowLatencyMode: true,
             liveSyncDurationCount: 6,
             liveMaxLatencyDurationCount: 12,
             maxBufferLength: 60,
             backBufferLength: 30,
-            manifestLoadingMaxRetry: 6,
-            fragLoadingMaxRetry: 6,
+            manifestLoadingMaxRetry: 999,
+            levelLoadingMaxRetry: 999,
+            fragLoadingMaxRetry: 999,
+            manifestLoadingRetryDelay: 1000,
+            levelLoadingRetryDelay: 1000,
+            fragLoadingRetryDelay: 1000,
           });
-          activeStreams.current.set(source.id, { hls });
+          stream.hls = hls;
 
           hls.loadSource(hlsUrl);
           hls.attachMedia(audio);
-          hls.on(Hls.Events.MANIFEST_PARSED, onReady);
+          hls.once(Hls.Events.MANIFEST_PARSED, onReady);
+          hls.on(Hls.Events.FRAG_LOADED, rememberProgress);
+          hls.on(Hls.Events.LEVEL_LOADED, rememberProgress);
 
           let retryCount = 0;
-          const MAX_RETRIES = 3;
           hls.on(Hls.Events.ERROR, async (_event, data) => {
-            if (!data.fatal) return;
+            if (!isCurrentStream()) return;
+            if (!data.fatal) {
+              if (String(data.details).toLowerCase().includes('stalled')) {
+                stream.lastProgressAt = Math.min(stream.lastProgressAt, Date.now() - STREAM_STALL_TIMEOUT_MS);
+              }
+              return;
+            }
 
-            if (data.type === Hls.ErrorTypes.NETWORK_ERROR && retryCount < MAX_RETRIES) {
+            if (data.type === Hls.ErrorTypes.NETWORK_ERROR && retryCount < MAX_HLS_RECOVERIES_BEFORE_RECONNECT) {
               retryCount++;
               try {
                 const freshUrl = await getOrcasoundStreamUrl(source);
@@ -237,31 +417,31 @@ export function StreamSelector({
               } catch {
                 hls.startLoad();
               }
-            } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR && retryCount < MAX_RETRIES) {
+            } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR && retryCount < MAX_HLS_RECOVERIES_BEFORE_RECONNECT) {
               retryCount++;
               hls.recoverMediaError();
             } else {
-              onError(`HLS error: ${data.type}`);
+              scheduleReconnect(`Recovering ${data.type.toLowerCase()} stream`);
             }
           });
         } else if (audio.canPlayType('application/vnd.apple.mpegurl')) {
           audio.src = hlsUrl;
           audio.addEventListener('canplay', onReady, { once: true });
-          audio.addEventListener('error', () => onError('Failed to load HLS stream'), { once: true });
           audio.load();
-          activeStreams.current.set(source.id, {});
+        } else {
+          onError('HLS is not supported in this browser');
         }
       } else if (source.url) {
         audio.src = source.url;
         audio.addEventListener('canplay', onReady, { once: true });
-        audio.addEventListener('error', () => onError('Failed to load stream'), { once: true });
         audio.load();
-        activeStreams.current.set(source.id, {});
+      } else {
+        onError('Source does not have a playable stream URL');
       }
     } catch (err) {
       onError(String(err));
     }
-  }, [defaultStreamSettings, onConnected]);
+  }, [cleanupActiveStream, defaultStreamSettings, onConnected]);
 
   // Auto-reconnect saved streams (AudioContext already resumed by Start button)
   useEffect(() => {

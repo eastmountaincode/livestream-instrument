@@ -141,18 +141,13 @@ function App() {
     <div className="instrument-ui relative min-h-screen bg-[#ebe8de] text-[#171717]">
       <SourceBackdrop activeIds={activeSourceIds} sources={availableSources} />
 
-      <main className="mx-auto flex max-w-[1120px] flex-col gap-3 px-4 py-4">
-        <header className="grid gap-3 border border-[#242424] bg-[#fbfaf6] p-3 md:grid-cols-[1fr_auto] md:items-end">
-          <div>
+      <main className="mx-auto flex max-w-[1120px] flex-col gap-3 px-4 pb-4">
+        <div className="sticky top-0 z-30 -mx-4 border-b border-[#242424] bg-[#ebe8de]/95 px-4 py-3 backdrop-blur">
+          <header className="grid gap-2 md:grid-cols-[auto_minmax(280px,1fr)] md:items-end">
             <h1 className="brand-title text-3xl leading-none text-[#171717] md:text-5xl">Cicada</h1>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase">
-            <span className="border border-[#242424] px-2 py-1">{activeSourceIds.size} Live</span>
-            <span className="border border-[#242424] px-2 py-1">{availableSources.length} Sources</span>
-          </div>
-        </header>
-
-        <Visualizer />
+            <Visualizer />
+          </header>
+        </div>
 
         <div className={`flex flex-col gap-3 lg:flex-row ${shouldEqualizeTopPanels ? 'lg:items-stretch' : 'lg:items-start'}`}>
           <div className="flex lg:w-[340px] lg:shrink-0">
@@ -182,7 +177,6 @@ function App() {
               label="03"
               open={openPanels.keyboard}
               onToggle={() => togglePanel('keyboard')}
-              meta={streamConnected ? 'Armed' : 'Idle'}
               className={shouldEqualizeTopPanels ? 'h-full' : ''}
             >
               <Keyboard streamConnected={streamConnected} inputVolume={keyboardVolume} />
