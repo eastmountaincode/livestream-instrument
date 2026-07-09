@@ -23,12 +23,20 @@ const VOICE_GAIN_BOOST = 8.0;
 const MIN_FILTER_FREQ = 20;
 const KEEPALIVE_GAIN = 0.000001;
 const KEEPALIVE_FREQ = 20;
+const PARTIAL_REFRESH_INTERVAL = 0.16;
+const PARTIAL_MIN_FREQ = 55;
+const PARTIAL_MAX_FREQ = 5000;
+const PARTIAL_MAX_DISTANCE_CENTS = 900;
+const PARTIAL_TOP_COUNT = 24;
+
+export type PitchSourceMode = 'bands' | 'partials';
 
 interface Voice {
   note: number;
   filter: BiquadFilterNode;
   gain: GainNode;
   active: boolean;
+  targetFrequency: number;
 }
 
 interface NoteSourceState {
@@ -47,6 +55,10 @@ function noteToFreq(note: number): number {
 interface StreamChannel {
   source: MediaElementAudioSourceNode;
   streamGain: GainNode;
+  rawAnalyser: AnalyserNode;
+  partialBins: Uint8Array<ArrayBuffer>;
+  partialFrequencies: number[];
+  partialAnalyzedAt: number;
   highPassFilter: BiquadFilterNode;
   lowPassFilter: BiquadFilterNode;
   analyser: AnalyserNode;
@@ -73,6 +85,7 @@ export class AudioEngine {
   private activeNotes: Map<number, ActiveNoteState> = new Map();
   private externalClock = false;
   private pitchBendSemitones = 0;
+  private pitchSourceMode: PitchSourceMode = 'bands';
   private keepAliveOscillator: OscillatorNode | null = null;
   private keepAliveGain: GainNode | null = null;
 
@@ -128,6 +141,11 @@ export class AudioEngine {
     merger.connect(monoOut);
 
     const streamGain = this.ctx.createGain();
+    const rawAnalyser = this.ctx.createAnalyser();
+    rawAnalyser.fftSize = 4096;
+    rawAnalyser.smoothingTimeConstant = 0.72;
+    monoOut.connect(rawAnalyser);
+
     const highPassFilter = this.ctx.createBiquadFilter();
     highPassFilter.type = 'highpass';
     highPassFilter.frequency.value = DEFAULT_HIGH_PASS_FREQ;
@@ -162,7 +180,7 @@ export class AudioEngine {
       filter.connect(gain);
       gain.connect(streamGain);
 
-      voices.push({ note: -1, filter, gain, active: false });
+      voices.push({ note: -1, filter, gain, active: false, targetFrequency: 440 });
     }
 
     // Fade in
@@ -173,6 +191,10 @@ export class AudioEngine {
     this.channels.set(id, {
       source,
       streamGain,
+      rawAnalyser,
+      partialBins: new Uint8Array(rawAnalyser.frequencyBinCount),
+      partialFrequencies: [],
+      partialAnalyzedAt: 0,
       highPassFilter,
       lowPassFilter,
       analyser,
@@ -213,6 +235,7 @@ export class AudioEngine {
         try { voice.gain.disconnect(); } catch { /* ok */ }
       }
       try { ch.source.disconnect(); } catch { /* ok */ }
+      try { ch.rawAnalyser.disconnect(); } catch { /* ok */ }
       try { ch.streamGain.disconnect(); } catch { /* ok */ }
       try { ch.highPassFilter.disconnect(); } catch { /* ok */ }
       try { ch.lowPassFilter.disconnect(); } catch { /* ok */ }
@@ -277,14 +300,68 @@ export class AudioEngine {
   }
 
   private getVoiceFrequency(ch: StreamChannel, note: number): number {
-    return this.clampFilterFrequency(noteToFreq(note + ch.octaveShift * 12 + this.pitchBendSemitones));
+    const target = noteToFreq(note + ch.octaveShift * 12 + this.pitchBendSemitones);
+    return this.getResolvedVoiceFrequency(ch, target);
+  }
+
+  private getResolvedVoiceFrequency(ch: StreamChannel, targetFrequency: number): number {
+    const target = this.clampFilterFrequency(targetFrequency);
+    if (this.pitchSourceMode !== 'partials') return target;
+
+    const partial = this.findNearestPartial(ch, target);
+    return partial ? this.clampFilterFrequency(partial) : target;
+  }
+
+  private refreshPartials(ch: StreamChannel) {
+    const now = this.ctx.currentTime;
+    if (now - ch.partialAnalyzedAt < PARTIAL_REFRESH_INTERVAL) return;
+
+    ch.rawAnalyser.getByteFrequencyData(ch.partialBins);
+    const sampleRate = this.ctx.sampleRate;
+    const binHz = sampleRate / ch.rawAnalyser.fftSize;
+    const peaks: Array<{ frequency: number; value: number }> = [];
+
+    for (let bin = 2; bin < ch.partialBins.length - 2; bin++) {
+      const frequency = bin * binHz;
+      if (frequency < PARTIAL_MIN_FREQ || frequency > PARTIAL_MAX_FREQ) continue;
+
+      const value = ch.partialBins[bin];
+      if (value < 24) continue;
+      if (value < ch.partialBins[bin - 1] || value < ch.partialBins[bin + 1]) continue;
+
+      peaks.push({ frequency, value });
+    }
+
+    ch.partialFrequencies = peaks
+      .sort((a, b) => b.value - a.value)
+      .slice(0, PARTIAL_TOP_COUNT)
+      .map(peak => peak.frequency)
+      .sort((a, b) => a - b);
+    ch.partialAnalyzedAt = now;
+  }
+
+  private findNearestPartial(ch: StreamChannel, targetFrequency: number): number | null {
+    this.refreshPartials(ch);
+
+    let nearest: number | null = null;
+    let nearestDistance = Infinity;
+    for (const frequency of ch.partialFrequencies) {
+      const distance = Math.abs(1200 * Math.log2(frequency / targetFrequency));
+      if (distance < nearestDistance) {
+        nearest = frequency;
+        nearestDistance = distance;
+      }
+    }
+
+    return nearestDistance <= PARTIAL_MAX_DISTANCE_CENTS ? nearest : null;
   }
 
   private retuneActiveVoices(timeConstant = 0.005) {
     const now = this.ctx.currentTime;
     for (const [, ch] of this.channels) {
       for (const [note, voice] of ch.activeVoices) {
-        voice.filter.frequency.setTargetAtTime(this.getVoiceFrequency(ch, note), now, timeConstant);
+        voice.targetFrequency = noteToFreq(note + ch.octaveShift * 12 + this.pitchBendSemitones);
+        voice.filter.frequency.setTargetAtTime(this.getResolvedVoiceFrequency(ch, voice.targetFrequency), now, timeConstant);
       }
     }
   }
@@ -310,6 +387,7 @@ export class AudioEngine {
 
     voice.note = note;
     voice.active = true;
+    voice.targetFrequency = noteToFreq(note + ch.octaveShift * 12 + this.pitchBendSemitones);
     voice.filter.frequency.setTargetAtTime(freq, now, 0.001);
     voice.filter.Q.setTargetAtTime(ch.filterQ, now, 0.001);
     voice.gain.gain.cancelScheduledValues(now);
@@ -357,6 +435,7 @@ export class AudioEngine {
     voice.gain.gain.setTargetAtTime(0, now, RELEASE);
     voice.active = false;
     voice.note = -1;
+    voice.targetFrequency = 440;
     ch.activeVoices.delete(note);
   }
 
@@ -417,6 +496,7 @@ export class AudioEngine {
         voice.gain.gain.setTargetAtTime(0, now, 0.01);
         voice.active = false;
         voice.note = -1;
+        voice.targetFrequency = 440;
       }
       ch.activeVoices.clear();
     }
@@ -505,8 +585,9 @@ export class AudioEngine {
 
   private applyGains() {
     const now = this.ctx.currentTime;
+    const soloId = this.soloId && this.channels.has(this.soloId) ? this.soloId : null;
     for (const [id, ch] of this.channels) {
-      const audible = this.soloId ? id === this.soloId : !ch.muted;
+      const audible = soloId ? id === soloId : !ch.muted;
       ch.streamGain.gain.cancelScheduledValues(0);
       ch.streamGain.gain.setTargetAtTime(audible ? ch.volume : 0, now, 0.01);
     }
@@ -545,6 +626,15 @@ export class AudioEngine {
 
   getPitchBendSemitones(): number {
     return this.pitchBendSemitones;
+  }
+
+  setPitchSourceMode(mode: PitchSourceMode) {
+    this.pitchSourceMode = mode === 'partials' ? 'partials' : 'bands';
+    this.retuneActiveVoices(0.03);
+  }
+
+  getPitchSourceMode(): PitchSourceMode {
+    return this.pitchSourceMode;
   }
 
   // --- Global controls (kept for backwards compat) ---

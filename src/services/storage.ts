@@ -5,6 +5,8 @@ const DEFAULT_CHORD_PAD_VOLUME = 1.55;
 const DEFAULT_HIGH_PASS_FREQ = 20;
 const DEFAULT_LOW_PASS_FREQ = 20000;
 
+export type PitchSourceMode = 'bands' | 'partials';
+
 export interface StreamSettings {
   filterQ: number;
   volume: number;
@@ -30,6 +32,7 @@ interface SavedState {
   keyboardVolume: number;
   chordPadVolume: number;
   chordPad: ChordPadState | null;
+  pitchSourceMode: PitchSourceMode;
 }
 
 function load(): SavedState | null {
@@ -75,6 +78,7 @@ function normalizeSavedState(state: Partial<SavedState> | null): SavedState {
     chordPad: savedChordPadState && typeof savedChordPadState === 'object'
       ? normalizeChordPadState(savedChordPadState)
       : null,
+    pitchSourceMode: state?.pitchSourceMode === 'partials' ? 'partials' : 'bands',
   };
 }
 
@@ -184,6 +188,16 @@ export function saveChordPadState(chordPad: ChordPadState): void {
 
 export function getChordPadState(): ChordPadState | null {
   return getCurrent().chordPad;
+}
+
+export function savePitchSourceMode(pitchSourceMode: PitchSourceMode): void {
+  const state = getCurrent();
+  state.pitchSourceMode = pitchSourceMode === 'partials' ? 'partials' : 'bands';
+  save(state);
+}
+
+export function getPitchSourceMode(): PitchSourceMode {
+  return getCurrent().pitchSourceMode;
 }
 
 export function removeStreamSettings(id: string): void {

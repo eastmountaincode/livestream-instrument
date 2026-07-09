@@ -101,7 +101,7 @@ export function ChordPad({ streamConnected, inputVolume, autoPlayDefaultChord = 
     const chordDef = CHORD_TYPES[type];
     if (!chordDef) return [];
     const baseNote = (oct + 1) * 12 + root; // MIDI note
-    let notes = chordDef.intervals.map(interval => baseNote + interval);
+    const notes = chordDef.intervals.map(interval => baseNote + interval);
 
     // Apply inversion: move bottom notes up an octave
     const effectiveInv = Math.min(inv, notes.length - 1);

@@ -313,19 +313,19 @@ export function useStreamPlayback({
       });
     };
 
-    const applyInitialSettings = () => {
+    const applyCurrentSettings = () => {
       const savedSettings = getStreamSettings(source.id);
       const defaultSettings = defaultsRef.current[source.id];
-      if (savedSettings || !defaultSettings) return;
+      const shouldSaveDefaults = !savedSettings && !!defaultSettings;
 
       const nextSettings: StreamSettings = {
-        filterQ: defaultSettings.filterQ ?? audioEngine.getStreamFilterQ(source.id),
-        volume: defaultSettings.volume ?? audioEngine.getStreamVolume(source.id),
-        highPassFreq: defaultSettings.highPassFreq ?? audioEngine.getStreamHighPass(source.id),
-        lowPassFreq: defaultSettings.lowPassFreq ?? audioEngine.getStreamLowPass(source.id),
-        pan: defaultSettings.pan ?? audioEngine.getStreamPan(source.id),
-        octaveShift: defaultSettings.octaveShift ?? audioEngine.getStreamOctave(source.id),
-        muted: defaultSettings.muted ?? audioEngine.getStreamMuted(source.id),
+        filterQ: savedSettings?.filterQ ?? defaultSettings?.filterQ ?? audioEngine.getStreamFilterQ(source.id),
+        volume: savedSettings?.volume ?? defaultSettings?.volume ?? audioEngine.getStreamVolume(source.id),
+        highPassFreq: savedSettings?.highPassFreq ?? defaultSettings?.highPassFreq ?? audioEngine.getStreamHighPass(source.id),
+        lowPassFreq: savedSettings?.lowPassFreq ?? defaultSettings?.lowPassFreq ?? audioEngine.getStreamLowPass(source.id),
+        pan: savedSettings?.pan ?? defaultSettings?.pan ?? audioEngine.getStreamPan(source.id),
+        octaveShift: savedSettings?.octaveShift ?? defaultSettings?.octaveShift ?? audioEngine.getStreamOctave(source.id),
+        muted: savedSettings?.muted ?? defaultSettings?.muted ?? audioEngine.getStreamMuted(source.id),
       };
       audioEngine.setStreamFilterQ(source.id, nextSettings.filterQ);
       audioEngine.setStreamVolume(source.id, nextSettings.volume);
@@ -334,7 +334,9 @@ export function useStreamPlayback({
       audioEngine.setStreamPan(source.id, nextSettings.pan);
       audioEngine.setStreamOctave(source.id, nextSettings.octaveShift);
       audioEngine.setStreamMuted(source.id, nextSettings.muted);
-      saveStreamSettings(source.id, nextSettings);
+      if (shouldSaveDefaults) {
+        saveStreamSettings(source.id, nextSettings);
+      }
     };
 
     const attachAudioChannel = () => {
@@ -343,7 +345,7 @@ export function useStreamPlayback({
 
       try {
         audioEngine.addStream(source.id, audio);
-        applyInitialSettings();
+        applyCurrentSettings();
         stream.ready = true;
         return true;
       } catch (error) {
@@ -568,8 +570,9 @@ export function useStreamPlayback({
   }, [cleanupActiveStream, setStatus]);
 
   useEffect(() => {
+    const streams = activeStreams.current;
     return () => {
-      for (const sourceId of Array.from(activeStreams.current.keys())) {
+      for (const sourceId of Array.from(streams.keys())) {
         cleanupActiveStream(sourceId);
       }
     };
