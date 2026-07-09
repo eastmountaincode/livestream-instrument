@@ -15,6 +15,13 @@ export interface StreamSettings {
   muted: boolean;
 }
 
+export interface ChordPadState {
+  selectedRoot: number;
+  selectedType: string;
+  inversion: number;
+  active: boolean;
+}
+
 interface SavedState {
   activeStreamIds: string[];
   streams: Record<string, StreamSettings>;
@@ -22,6 +29,7 @@ interface SavedState {
   masterVolume: number;
   keyboardVolume: number;
   chordPadVolume: number;
+  chordPad: ChordPadState | null;
 }
 
 function load(): SavedState | null {
@@ -43,8 +51,12 @@ function normalizeSavedState(state: Partial<SavedState> | null): SavedState {
   const savedMasterVolume = state?.masterVolume;
   const savedKeyboardVolume = state?.keyboardVolume;
   const savedChordPadVolume = state?.chordPadVolume;
+  const savedChordPadState = state?.chordPad;
   const streams = Object.fromEntries(
-    Object.entries(state?.streams ?? {}).map(([id, settings]) => [id, normalizeStreamSettings(settings)])
+    Object.entries(state?.streams ?? {}).map(([id, settings]) => [
+      id,
+      normalizeStreamSettings(settings && typeof settings === 'object' ? settings : {}),
+    ])
   );
 
   return {
@@ -60,6 +72,9 @@ function normalizeSavedState(state: Partial<SavedState> | null): SavedState {
     chordPadVolume: typeof savedChordPadVolume === 'number' && Number.isFinite(savedChordPadVolume)
       ? savedChordPadVolume
       : DEFAULT_CHORD_PAD_VOLUME,
+    chordPad: savedChordPadState && typeof savedChordPadState === 'object'
+      ? normalizeChordPadState(savedChordPadState)
+      : null,
   };
 }
 
@@ -72,6 +87,25 @@ function normalizeStreamSettings(settings: Partial<StreamSettings>): StreamSetti
     pan: typeof settings.pan === 'number' && Number.isFinite(settings.pan) ? settings.pan : 0,
     octaveShift: typeof settings.octaveShift === 'number' && Number.isFinite(settings.octaveShift) ? settings.octaveShift : 0,
     muted: typeof settings.muted === 'boolean' ? settings.muted : false,
+  };
+}
+
+function normalizeChordPadState(state: Partial<ChordPadState>): ChordPadState {
+  const selectedRoot = typeof state.selectedRoot === 'number' && Number.isFinite(state.selectedRoot)
+    ? Math.min(11, Math.max(0, Math.round(state.selectedRoot)))
+    : 5;
+  const selectedType = typeof state.selectedType === 'string' && state.selectedType.trim()
+    ? state.selectedType
+    : 'min11';
+  const inversion = typeof state.inversion === 'number' && Number.isFinite(state.inversion)
+    ? Math.max(0, Math.round(state.inversion))
+    : 0;
+
+  return {
+    selectedRoot,
+    selectedType,
+    inversion,
+    active: state.active === true,
   };
 }
 
@@ -140,6 +174,16 @@ export function saveChordPadVolume(chordPadVolume: number): void {
 
 export function getChordPadVolume(): number {
   return getCurrent().chordPadVolume;
+}
+
+export function saveChordPadState(chordPad: ChordPadState): void {
+  const state = getCurrent();
+  state.chordPad = normalizeChordPadState(chordPad);
+  save(state);
+}
+
+export function getChordPadState(): ChordPadState | null {
+  return getCurrent().chordPad;
 }
 
 export function removeStreamSettings(id: string): void {

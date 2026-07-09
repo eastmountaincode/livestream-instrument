@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { Minus, Plus } from 'lucide-react';
 import { audioEngine } from '../services/AudioEngine';
 import { webrtcService } from '../services/WebRTCService';
+import { getChordPadState, saveChordPadState, type ChordPadState } from '../services/storage';
 
 const CHORD_PAD_SOURCE = 'chord-pad';
 
@@ -35,6 +36,8 @@ const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 
 const ROOT_NOTES = NOTE_NAMES.map((name, i) => ({ name, semitone: i }));
 const DEFAULT_ROOT = 5; // F
 const DEFAULT_TYPE = 'min11';
+const AUTO_CHORD_RETRY_DELAY_MS = 250;
+const MAX_AUTO_CHORD_RETRIES = 20;
 
 // Common chord type groups for the UI
 const CHORD_GROUPS: { label: string; types: string[] }[] = [
@@ -44,6 +47,27 @@ const CHORD_GROUPS: { label: string; types: string[] }[] = [
   { label: '6ths',      types: ['6', 'min6'] },
 ];
 
+function clampInversion(type: string, inversion: number): number {
+  const maxInversion = (CHORD_TYPES[type]?.intervals.length || 3) - 1;
+  return Math.min(maxInversion, Math.max(0, inversion));
+}
+
+function notesMatch(a: number[], b: number[]): boolean {
+  return a.length === b.length && a.every((note, index) => note === b[index]);
+}
+
+function getInitialChordPadState(): ChordPadState | null {
+  const saved = getChordPadState();
+  if (!saved || !CHORD_TYPES[saved.selectedType]) return null;
+
+  return {
+    selectedRoot: Math.min(11, Math.max(0, saved.selectedRoot)),
+    selectedType: saved.selectedType,
+    inversion: clampInversion(saved.selectedType, saved.inversion),
+    active: saved.active,
+  };
+}
+
 interface Props {
   streamConnected: boolean;
   inputVolume: number;
@@ -52,13 +76,25 @@ interface Props {
 
 export function ChordPad({ streamConnected, inputVolume, autoPlayDefaultChord = false }: Props) {
   const octave = 3; // Base octave 3 (C3 = MIDI 48)
-  const [selectedRoot, setSelectedRoot] = useState(DEFAULT_ROOT);
-  const [selectedType, setSelectedType] = useState(DEFAULT_TYPE);
+  const [initialChordPadState] = useState(() => getInitialChordPadState());
+  const [selectedRoot, setSelectedRoot] = useState(() => initialChordPadState?.selectedRoot ?? DEFAULT_ROOT);
+  const [selectedType, setSelectedType] = useState(() => initialChordPadState?.selectedType ?? DEFAULT_TYPE);
   const [latched, setLatched] = useState(false);
-  const [activeChordNotes, setActiveChordNotes] = useState<number[]>([]);
-  const [inversion, setInversion] = useState(0);
+  const [inversion, setInversion] = useState(() => initialChordPadState?.inversion ?? 0);
+  const [autoChordRetry, setAutoChordRetry] = useState(0);
   const prevNotes = useRef<number[]>([]);
-  const defaultChordPlayedRef = useRef(false);
+  const autoChordPlayedRef = useRef(false);
+  const shouldAutoPlayInitialChordRef = useRef(initialChordPadState?.active ?? autoPlayDefaultChord);
+
+  const rememberChordState = useCallback((root: number, type: string, inv: number, active: boolean) => {
+    if (!CHORD_TYPES[type]) return;
+    saveChordPadState({
+      selectedRoot: root,
+      selectedType: type,
+      inversion: clampInversion(type, inv),
+      active,
+    });
+  }, []);
 
   // Build chord notes from root + type + octave + inversion
   const buildChord = useCallback((root: number, type: string, oct: number, inv: number): number[] => {
@@ -79,33 +115,37 @@ export function ChordPad({ streamConnected, inputVolume, autoPlayDefaultChord = 
 
   // Play a chord (release previous, play new)
   const playChord = useCallback((notes: number[]) => {
-    // Release previous notes
-    for (const n of prevNotes.current) {
-      if (!notes.includes(n)) {
-        audioEngine.noteOff(n, CHORD_PAD_SOURCE);
-        webrtcService.sendNoteOff(n);
-      }
+    if (!streamConnected || !audioEngine.isStreamConnected()) return false;
+
+    const previousNotes = prevNotes.current;
+    const acceptedNotes: number[] = [];
+
+    for (const n of previousNotes) {
+      webrtcService.sendNoteOff(n);
     }
-    // Play new notes (skip if already playing)
+
+    audioEngine.allNotesOff(CHORD_PAD_SOURCE);
+
     for (const n of notes) {
-      if (!prevNotes.current.includes(n)) {
-        const scaledVelocity = Math.max(0, Math.round(100 * inputVolume));
-        audioEngine.noteOn(n, scaledVelocity, CHORD_PAD_SOURCE);
-        webrtcService.sendNoteOn(n, 100);
-      }
+      const scaledVelocity = Math.max(0, Math.round(100 * inputVolume));
+      const accepted = audioEngine.noteOn(n, scaledVelocity, CHORD_PAD_SOURCE);
+      if (!accepted) continue;
+      webrtcService.sendNoteOn(n, 100);
+      acceptedNotes.push(n);
     }
-    prevNotes.current = notes;
-    setActiveChordNotes(notes);
-  }, [inputVolume]);
+    prevNotes.current = acceptedNotes;
+    return acceptedNotes.length > 0;
+  }, [inputVolume, streamConnected]);
 
   const releaseAll = useCallback(() => {
     for (const n of prevNotes.current) {
-      audioEngine.noteOff(n, CHORD_PAD_SOURCE);
       webrtcService.sendNoteOff(n);
     }
+    audioEngine.allNotesOff(CHORD_PAD_SOURCE);
     prevNotes.current = [];
-    setActiveChordNotes([]);
-  }, []);
+    autoChordPlayedRef.current = true;
+    rememberChordState(selectedRoot, selectedType, inversion, false);
+  }, [inversion, rememberChordState, selectedRoot, selectedType]);
 
   useEffect(() => {
     const scaledVelocity = Math.max(0, Math.round(100 * inputVolume));
@@ -118,22 +158,41 @@ export function ChordPad({ streamConnected, inputVolume, autoPlayDefaultChord = 
   useEffect(() => {
     if (prevNotes.current.length > 0) {
       const notes = buildChord(selectedRoot, selectedType, octave, inversion);
-      playChord(notes);
+      if (notesMatch(notes, prevNotes.current)) {
+        rememberChordState(selectedRoot, selectedType, inversion, true);
+        return;
+      }
+      if (playChord(notes)) {
+        rememberChordState(selectedRoot, selectedType, inversion, true);
+      }
     }
-  }, [selectedRoot, selectedType, octave, inversion, buildChord, playChord]);
+  }, [selectedRoot, selectedType, octave, inversion, buildChord, playChord, rememberChordState]);
 
   useEffect(() => {
-    if (!autoPlayDefaultChord || !streamConnected || defaultChordPlayedRef.current) return;
-    defaultChordPlayedRef.current = true;
-    const notes = buildChord(DEFAULT_ROOT, DEFAULT_TYPE, octave, 0);
-    playChord(notes);
-  }, [autoPlayDefaultChord, buildChord, octave, playChord, streamConnected]);
+    if (!shouldAutoPlayInitialChordRef.current || !streamConnected || autoChordPlayedRef.current) return;
+
+    const notes = buildChord(selectedRoot, selectedType, octave, inversion);
+    if (playChord(notes)) {
+      autoChordPlayedRef.current = true;
+      rememberChordState(selectedRoot, selectedType, inversion, true);
+      return;
+    }
+
+    if (autoChordRetry >= MAX_AUTO_CHORD_RETRIES) return;
+    const retryTimer = window.setTimeout(() => {
+      setAutoChordRetry(retry => retry + 1);
+    }, AUTO_CHORD_RETRY_DELAY_MS);
+
+    return () => window.clearTimeout(retryTimer);
+  }, [autoChordRetry, buildChord, inversion, octave, playChord, rememberChordState, selectedRoot, selectedType, streamConnected]);
 
   const handleChordTrigger = (root: number, type: string) => {
     setSelectedRoot(root);
     setSelectedType(type);
     const notes = buildChord(root, type, octave, inversion);
-    playChord(notes);
+    const played = playChord(notes);
+    autoChordPlayedRef.current = true;
+    rememberChordState(root, type, inversion, played);
   };
 
   const handleLatchToggle = () => {
@@ -169,7 +228,13 @@ export function ChordPad({ streamConnected, inputVolume, autoPlayDefaultChord = 
         <div className="flex items-center gap-1 text-[11px] font-black uppercase text-black">
           <button
             className="icon-button flex h-7 w-7 items-center justify-center border-2 border-black p-0"
-            onClick={() => setInversion(Math.max(0, inversion - 1))}
+            onClick={() => {
+              const nextInversion = Math.max(0, inversion - 1);
+              setInversion(nextInversion);
+              if (prevNotes.current.length === 0) {
+                rememberChordState(selectedRoot, selectedType, nextInversion, false);
+              }
+            }}
             aria-label="Decrease chord inversion"
             title="Decrease chord inversion"
           >
@@ -178,7 +243,13 @@ export function ChordPad({ streamConnected, inputVolume, autoPlayDefaultChord = 
           <span>Inv {inversion}</span>
           <button
             className="icon-button flex h-7 w-7 items-center justify-center border-2 border-black p-0"
-            onClick={() => setInversion(Math.min(maxInversion, inversion + 1))}
+            onClick={() => {
+              const nextInversion = Math.min(maxInversion, inversion + 1);
+              setInversion(nextInversion);
+              if (prevNotes.current.length === 0) {
+                rememberChordState(selectedRoot, selectedType, nextInversion, false);
+              }
+            }}
             aria-label="Increase chord inversion"
             title="Increase chord inversion"
           >
@@ -192,11 +263,11 @@ export function ChordPad({ streamConnected, inputVolume, autoPlayDefaultChord = 
       </div>
 
       {/* Root note selector */}
-      <div className="grid grid-cols-12 gap-1">
+      <div className="grid grid-cols-6 gap-1 sm:grid-cols-12">
         {ROOT_NOTES.map(({ name, semitone }) => (
           <button
             key={semitone}
-            className={`border-2 px-0.5 py-1.5 text-center font-mono text-[11px] font-black ${
+            className={`min-h-10 border-2 px-0.5 py-1.5 text-center font-mono text-[11px] font-black ${
               selectedRoot === semitone
                 ? 'border-black bg-black text-white'
                 : name.includes('#')
@@ -205,8 +276,8 @@ export function ChordPad({ streamConnected, inputVolume, autoPlayDefaultChord = 
             }`}
             onClick={() => {
               setSelectedRoot(semitone);
-              if (latched && prevNotes.current.length > 0) {
-                // Will auto-update via useEffect
+              if (prevNotes.current.length === 0) {
+                rememberChordState(semitone, selectedType, inversion, false);
               }
             }}
           >
@@ -226,7 +297,7 @@ export function ChordPad({ streamConnected, inputVolume, autoPlayDefaultChord = 
               return (
                 <button
                   key={type}
-                  className={`min-w-[48px] border-2 px-2 py-[5px] text-center font-mono text-[10px] font-black ${
+                  className={`min-h-10 min-w-[56px] border-2 px-2 py-[5px] text-center font-mono text-[10px] font-black ${
                     selectedType === type
                       ? 'border-black bg-black text-white'
                       : 'border-black bg-white text-black hover:bg-black hover:text-white'
@@ -243,7 +314,8 @@ export function ChordPad({ streamConnected, inputVolume, autoPlayDefaultChord = 
       ))}
 
       {/* Quick root+chord grid: all 12 roots as rows, common chords as columns */}
-      <div className="border-2 border-black">
+      <div className="overflow-x-auto border-2 border-black">
+        <div className="min-w-[520px]">
         <div className="flex border-b-2 border-black bg-soft">
           <span className="min-w-[36px] px-1 py-[3px] text-center text-[9px] font-black uppercase text-black/55">Quick</span>
           {['maj', 'min', 'maj7', 'min7', 'min9', 'min11', 'sus4'].map(type => (
@@ -257,7 +329,7 @@ export function ChordPad({ streamConnected, inputVolume, autoPlayDefaultChord = 
               <button
                 key={type}
                 className={`flex-1 border-l border-black px-0.5 py-1 text-center font-mono text-[9px] font-black ${
-                  selectedRoot === semitone && selectedType === type && activeChordNotes.length > 0
+                  selectedRoot === semitone && selectedType === type
                     ? 'bg-black text-white'
                     : 'bg-white text-black hover:bg-black hover:text-white'
                 }`}
@@ -268,6 +340,7 @@ export function ChordPad({ streamConnected, inputVolume, autoPlayDefaultChord = 
             ))}
           </div>
         ))}
+        </div>
       </div>
 
       {!streamConnected && <p className="m-0 border-2 border-black px-2 py-1 text-[10px] font-black uppercase text-black/55">Select a live source first</p>}

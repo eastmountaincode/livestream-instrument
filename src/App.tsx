@@ -9,15 +9,19 @@ import { MidiPanel } from './components/MidiPanel';
 import { WebRTCPanel } from './components/WebRTCPanel';
 import { SettingsPanel } from './components/SettingsPanel';
 import { Panel } from './components/ui';
+import { useStreamPlayback } from './hooks/useStreamPlayback';
 import { midiService } from './services/MidiService';
 import { audioEngine } from './services/AudioEngine';
-import { getSavedState, getKeyboardVolume, getChordPadVolume } from './services/storage';
+import { getSavedState, getKeyboardVolume, getChordPadVolume, saveActiveStreams } from './services/storage';
 import type { StreamSettings } from './services/storage';
-import type { LiveSource } from './services/streams';
+import { fetchAcceptedLiveSources, type LiveSource } from './services/streams';
 
 type PanelKey = 'sources' | 'mixer' | 'keyboard' | 'chords' | 'io' | 'settings';
 
 const DEFAULT_DEMO_SOURCE_IDS = ['locus-usti-nad-labem-duul', 'locus-jasper-ridge'];
+const EMPTY_STREAM_SETTINGS: Record<string, Partial<StreamSettings>> = {};
+const SOURCE_LOAD_RETRIES = 3;
+const SOURCE_LOAD_RETRY_DELAY_MS = 700;
 const DEFAULT_DEMO_STREAM_SETTINGS: Record<string, Partial<StreamSettings>> = {
   'locus-usti-nad-labem-duul': {
     filterQ: 46,
@@ -33,27 +37,48 @@ const DEFAULT_DEMO_STREAM_SETTINGS: Record<string, Partial<StreamSettings>> = {
   },
 };
 
-function App() {
-  const savedStateOnLoadRef = useRef(getSavedState());
-  const [started, setStarted] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [streamConnected, setStreamConnected] = useState(false);
-  const [activeSourceIds, setActiveSourceIds] = useState<Set<string>>(new Set());
-  const [openPanels, setOpenPanels] = useState<Record<PanelKey, boolean>>({
+function getInitialOpenPanels(): Record<PanelKey, boolean> {
+  const compact = typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches;
+
+  return {
     sources: true,
-    mixer: true,
+    mixer: !compact,
     keyboard: true,
-    chords: true,
+    chords: !compact,
     io: false,
     settings: false,
-  });
+  };
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise(resolve => window.setTimeout(resolve, ms));
+}
+
+function App() {
+  const savedStateOnLoadRef = useRef(getSavedState());
+  const restoredStreamsRef = useRef(false);
+  const [started, setStarted] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [openPanels, setOpenPanels] = useState<Record<PanelKey, boolean>>(() => getInitialOpenPanels());
   const [keyboardVolume, setKeyboardVolume] = useState(() => getKeyboardVolume());
   const [chordPadVolume, setChordPadVolume] = useState(() => getChordPadVolume());
   const [availableSources, setAvailableSources] = useState<LiveSource[]>([]);
-  const removeSourceRef = useRef<((sourceId: string) => void) | null>(null);
+  const [sourceLoadError, setSourceLoadError] = useState('');
+  const [sourcesReady, setSourcesReady] = useState(false);
 
   const hasSavedStreams = savedStateOnLoadRef.current?.activeStreamIds?.length ?? 0;
   const shouldStartDemo = hasSavedStreams === 0;
+  const {
+    activeIds,
+    wantedIds,
+    statuses,
+    connect,
+    disconnect,
+  } = useStreamPlayback({
+    defaultStreamSettings: shouldStartDemo ? DEFAULT_DEMO_STREAM_SETTINGS : EMPTY_STREAM_SETTINGS,
+    onConnected: () => { setLoading(false); },
+  });
+  const streamConnected = activeIds.size > 0;
 
   useEffect(() => {
     midiService.init();
@@ -63,20 +88,84 @@ function App() {
     midiService.setInputVolume(keyboardVolume);
   }, [keyboardVolume]);
 
+  useEffect(() => {
+    if (!started) return;
+    let cancelled = false;
+
+    async function loadSources() {
+      for (let attempt = 1; attempt <= SOURCE_LOAD_RETRIES; attempt++) {
+        try {
+          const result = await fetchAcceptedLiveSources();
+
+          if (cancelled) return;
+          setAvailableSources(result.sources);
+          setSourceLoadError('');
+          setSourcesReady(true);
+          return;
+        } catch (error) {
+          if (attempt < SOURCE_LOAD_RETRIES) {
+            await wait(SOURCE_LOAD_RETRY_DELAY_MS * attempt);
+            continue;
+          }
+
+          if (cancelled) return;
+          setAvailableSources([]);
+          setSourceLoadError(error instanceof Error ? error.message : 'Failed to load stream catalog');
+          setSourcesReady(true);
+        }
+      }
+    }
+
+    void loadSources();
+    return () => {
+      cancelled = true;
+    };
+  }, [started]);
+
+  useEffect(() => {
+    if (!started || restoredStreamsRef.current || !sourcesReady) return;
+    restoredStreamsRef.current = true;
+
+    const saved = savedStateOnLoadRef.current;
+    const idsToConnect = saved?.activeStreamIds.length
+      ? saved.activeStreamIds
+      : shouldStartDemo
+        ? DEFAULT_DEMO_SOURCE_IDS
+        : [];
+
+    for (const id of idsToConnect) {
+      const source = availableSources.find(s => s.id === id);
+      if (source) {
+        void connect(source);
+      }
+    }
+  }, [availableSources, connect, shouldStartDemo, sourcesReady, started]);
+
+  useEffect(() => {
+    if (restoredStreamsRef.current) {
+      saveActiveStreams(Array.from(wantedIds));
+    }
+  }, [wantedIds]);
+
+  useEffect(() => {
+    if (!started || !('mediaSession' in navigator)) return;
+    navigator.mediaSession.playbackState = activeIds.size > 0 ? 'playing' : 'none';
+
+    return () => {
+      navigator.mediaSession.playbackState = 'none';
+    };
+  }, [activeIds.size, started]);
+
   const handleStart = useCallback(async () => {
     setLoading(true);
-    await audioEngine.resume();
+    void audioEngine.resume().catch(() => undefined);
     setStarted(true);
-    // StreamSelector will handle reconnecting saved streams
-  }, []);
-
-  const handleRemoveSourceReady = useCallback((removeSource: (sourceId: string) => void) => {
-    removeSourceRef.current = removeSource;
+    setLoading(false);
   }, []);
 
   const handleRemoveSource = useCallback((sourceId: string) => {
-    removeSourceRef.current?.(sourceId);
-  }, []);
+    disconnect(sourceId);
+  }, [disconnect]);
 
   const togglePanel = useCallback((key: PanelKey) => {
     setOpenPanels(prev => ({ ...prev, [key]: !prev[key] }));
@@ -106,11 +195,11 @@ function App() {
 
   return (
     <div className="instrument-ui relative min-h-screen bg-ground text-copy">
-      <SourceBackdrop activeIds={activeSourceIds} sources={availableSources} />
+      <SourceBackdrop activeIds={activeIds} sources={availableSources} />
 
       <div className="sticky top-0 z-30 border-b border-ink bg-ground/95 backdrop-blur">
-        <header className="mx-auto grid max-w-[1120px] gap-2 px-4 py-3 md:grid-cols-[auto_minmax(280px,1fr)] md:items-end">
-          <h1 className="brand-title text-3xl leading-none text-copy md:text-5xl">Cicada</h1>
+        <header className="mx-auto grid max-w-[1120px] grid-cols-[auto_minmax(0,1fr)] items-end gap-2 px-4 py-2 md:grid-cols-[auto_minmax(280px,1fr)] md:py-3">
+          <h1 className="brand-title text-2xl leading-none text-copy md:text-5xl">Cicada</h1>
           <Visualizer />
         </header>
       </div>
@@ -123,17 +212,19 @@ function App() {
               label="01"
               open={openPanels.sources}
               onToggle={() => togglePanel('sources')}
-              meta={`${activeSourceIds.size}/${availableSources.length}`}
+              meta={`${activeIds.size}/${availableSources.length}`}
               className={shouldEqualizeTopPanels ? 'h-full' : ''}
+              keepMounted
             >
               <StreamSelector
-                onConnected={() => { setStreamConnected(true); setLoading(false); }}
-                onActiveChange={setActiveSourceIds}
-                onSourcesChange={setAvailableSources}
-                onRemoveSourceReady={handleRemoveSourceReady}
-                defaultSourceIds={shouldStartDemo ? DEFAULT_DEMO_SOURCE_IDS : []}
-                defaultStreamSettings={shouldStartDemo ? DEFAULT_DEMO_STREAM_SETTINGS : {}}
-                autoRestore
+                sources={availableSources}
+                sourceLoadError={sourceLoadError}
+                sourcesReady={sourcesReady}
+                activeIds={activeIds}
+                wantedIds={wantedIds}
+                statuses={statuses}
+                onConnect={connect}
+                onDisconnect={disconnect}
               />
             </Panel>
           </div>
@@ -156,10 +247,10 @@ function App() {
           label="02"
           open={openPanels.mixer}
           onToggle={() => togglePanel('mixer')}
-          meta={`${activeSourceIds.size} Tracks`}
+          meta={`${activeIds.size} Tracks`}
         >
           <Controls
-            activeSourceIds={activeSourceIds}
+            activeSourceIds={activeIds}
             sources={availableSources}
             keyboardVolume={keyboardVolume}
             chordPadVolume={chordPadVolume}
@@ -176,8 +267,9 @@ function App() {
             open={openPanels.chords}
             onToggle={() => togglePanel('chords')}
             className="self-start"
+            keepMounted
           >
-            <ChordPad streamConnected={streamConnected} inputVolume={chordPadVolume} autoPlayDefaultChord={shouldStartDemo} />
+            <ChordPad streamConnected={streamConnected} inputVolume={chordPadVolume} autoPlayDefaultChord />
           </Panel>
 
           <Panel

@@ -1,17 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
-  <rect x="2" y="2" width="28" height="28" rx="6" fill="#fbfaf6"/>
-  <rect x="2.75" y="2.75" width="26.5" height="26.5" rx="5.25" stroke="#242424" stroke-width="1.5"/>
-  <g transform="translate(4 4)" stroke="#242424" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M12 20v-9"/>
-    <path d="M14 7a4 4 0 0 1 4 4v3a6 6 0 0 1-12 0v-3a4 4 0 0 1 4-4z"/>
-    <path d="M14.12 3.88 16 2"/>
-    <path d="M21 21a4 4 0 0 0-3.81-4"/>
-    <path d="M21 5a4 4 0 0 1-3.55 3.97"/>
-    <path d="M22 13h-4"/>
-    <path d="M3 21a4 4 0 0 1 3.81-4"/>
-    <path d="M3 5a4 4 0 0 0 3.55 3.97"/>
-    <path d="M6 13H2"/>
-    <path d="m8 2 1.88 1.88"/>
-    <path d="M9 7.13V6a3 3 0 1 1 6 0v1.13"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" role="img" aria-labelledby="title">
+  <title id="title">Cicada</title>
+  <rect width="32" height="32" fill="#242424"/>
+  <path
+    fill="#fff"
+    transform="matrix(0.045536 0 0 -0.045536 2.566964 23.285714)"
+    d="M116 9 24 101Q15 110 15 122V290Q15 304 24 311Q32 320 45 320H273Q285 320 294 311L386 219Q395 210 407 210H545Q558 210 566.5 201.5Q575 193 575 180Q575 105 575 30Q575 17 566 9Q559 0 545 0H137Q125 0 116 9ZM396 249 342 303Q337 308 340 314Q342 320 349 320H545Q558 320 566.5 311.5Q575 303 575 290V270Q575 257 566.5 248.5Q558 240 545 240H417Q405 240 396 249Z"
+  />
 </svg>

@@ -38,5 +38,5 @@ export function Visualizer() {
     return () => cancelAnimationFrame(rafRef.current);
   }, []);
 
-  return <canvas ref={canvasRef} className="h-[54px] w-full border-2 border-black bg-white" width={1200} height={100} />;
+  return <canvas ref={canvasRef} className="h-8 w-full border-2 border-black bg-white md:h-[54px]" width={1200} height={100} />;
 }

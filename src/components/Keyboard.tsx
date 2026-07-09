@@ -77,7 +77,8 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
 
   const triggerNoteOn = useCallback((note: number, velocity = 100) => {
     const scaledVelocity = Math.max(0, Math.round(velocity * inputVolume));
-    audioEngine.noteOn(note, scaledVelocity, KEYBOARD_SOURCE);
+    const accepted = audioEngine.noteOn(note, scaledVelocity, KEYBOARD_SOURCE);
+    if (!accepted) return;
     webrtcService.sendNoteOn(note, velocity);
     setActiveNotes(prev => new Set(prev).add(note));
   }, [inputVolume]);
@@ -102,7 +103,8 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
         return next;
       } else {
         const scaledVelocity = Math.max(0, Math.round(velocity * inputVolume));
-        audioEngine.noteOn(note, scaledVelocity, KEYBOARD_SOURCE);
+        const accepted = audioEngine.noteOn(note, scaledVelocity, KEYBOARD_SOURCE);
+        if (!accepted) return prev;
         webrtcService.sendNoteOn(note, velocity);
         return new Set(prev).add(note);
       }
@@ -226,9 +228,9 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
     };
   }, [baseOctave, latchMode, nudgeBaseOctave, releaseAll, streamConnected, toggleNote, triggerNoteOff, triggerNoteOn]);
 
-  // Visual piano: 3 octaves on desktop, cleaner C-E span on narrow screens.
+  // Visual piano: 3 octaves on desktop, one octave on narrow screens.
   const startNote = (baseOctave + 1) * 12;
-  const visualKeyCount = compactVisualRange ? 17 : 37;
+  const visualKeyCount = compactVisualRange ? 13 : 37;
   const keys: { note: number; black: boolean; name: string }[] = [];
   for (let i = 0; i < visualKeyCount; i++) {
     const note = startNote + i;
@@ -275,6 +277,7 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
     if (note === null) return;
 
     event.preventDefault();
+    if (!streamConnected) return;
 
     if (latchMode) {
       toggleNote(note);
@@ -282,6 +285,7 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
     }
 
     activePointerId.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
     switchGlideNote(note);
   };
 
@@ -296,6 +300,9 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
     if (activePointerId.current !== event.pointerId) return;
 
     event.preventDefault();
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
     endGlide();
   };
 
@@ -303,12 +310,13 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
   const blackKeys = keys.filter(k => k.black);
   const blackKeyWidthPercent = (100 / whiteKeys.length) * 0.64;
   const displayedActiveNotes = new Set([...activeNotes, ...activeMidiNotes]);
+  const rangeLabel = compactVisualRange ? `Keys C${baseOctave}-C${baseOctave + 1}` : `Keys C${baseOctave}-G${baseOctave + 1}`;
 
   return (
     <div className="grid gap-3">
       <div className="flex flex-wrap items-center gap-3 border-b-2 border-black pb-2">
         <button
-          className={`border-2 px-3 py-1 font-mono text-[10px] font-black uppercase ${
+          className={`min-h-10 border-2 px-3 py-1 font-mono text-[10px] font-black uppercase ${
             latchMode
               ? 'border-black bg-black text-white'
               : 'border-black bg-white text-black hover:bg-black hover:text-white'
@@ -319,7 +327,7 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
         </button>
         <div className="flex items-center gap-1 text-[11px] font-black uppercase text-black">
           <button
-            className="icon-button flex h-7 w-7 items-center justify-center border-2 border-black p-0 disabled:opacity-60"
+            className="icon-button flex h-10 w-10 items-center justify-center border-2 border-black p-0 disabled:opacity-60"
             onClick={() => nudgeBaseOctave(-1)}
             disabled={baseOctave <= MIN_BASE_OCTAVE}
             aria-label="Lower key range"
@@ -327,9 +335,9 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
           >
             <Minus aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={2.5} />
           </button>
-          <span>Keys C{baseOctave}-G{baseOctave + 1}</span>
+          <span>{rangeLabel}</span>
           <button
-            className="icon-button flex h-7 w-7 items-center justify-center border-2 border-black p-0 disabled:opacity-60"
+            className="icon-button flex h-10 w-10 items-center justify-center border-2 border-black p-0 disabled:opacity-60"
             onClick={() => nudgeBaseOctave(1)}
             disabled={baseOctave >= MAX_BASE_OCTAVE}
             aria-label="Raise key range"
@@ -340,7 +348,7 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
         </div>
         {latchMode && (
           <button
-            className="border-2 border-black bg-warning px-2.5 py-1 font-mono text-[10px] font-black uppercase text-black hover:bg-black hover:text-white"
+            className="min-h-10 border-2 border-black bg-warning px-2.5 py-1 font-mono text-[10px] font-black uppercase text-black hover:bg-black hover:text-white"
             onClick={releaseAll}
           >
             Release All

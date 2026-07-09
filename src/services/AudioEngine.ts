@@ -318,8 +318,10 @@ export class AudioEngine {
     ch.activeVoices.set(note, voice);
   }
 
-  noteOn(note: number, velocity: number = 127, source: string = 'default') {
-    if (!this.isStreamConnected()) return;
+  noteOn(note: number, velocity: number = 127, source: string = 'default'): boolean {
+    if (!this.isStreamConnected()) return false;
+
+    void this.resume().catch(() => undefined);
 
     const noteState = this.activeNotes.get(note) ?? { sources: new Map<string, NoteSourceState>() };
     const sourceState = noteState.sources.get(source);
@@ -336,12 +338,14 @@ export class AudioEngine {
 
     if (wasActive) {
       this.refreshNoteGain(note);
-      return;
+      return true;
     }
 
     for (const [, ch] of this.channels) {
       this.noteOnForChannel(ch, note, velocity);
     }
+
+    return true;
   }
 
   private noteOffForChannel(ch: StreamChannel, note: number) {
