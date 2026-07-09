@@ -269,7 +269,7 @@ function App() {
             className="self-start"
             keepMounted
           >
-            <ChordPad streamConnected={streamConnected} inputVolume={chordPadVolume} autoPlayDefaultChord />
+            <ChordPad streamConnected={streamConnected} inputVolume={chordPadVolume} autoPlayDefaultChord={shouldStartDemo} />
           </Panel>
 
           <Panel
