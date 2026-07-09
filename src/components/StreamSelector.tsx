@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useMemo } from 'react';
 import type { StreamConnectOptions, StreamPlaybackPhase, StreamPlaybackStatus } from '../hooks/useStreamPlayback';
 import type { LiveSource } from '../services/streams';
 import { formatLocalTime } from '../utils/format';
+import { LoadingSpinner } from './LoadingSpinner';
 import { Badge } from './ui';
 
 interface Props {
@@ -26,6 +27,26 @@ const PHASE_LABELS: Record<StreamPlaybackPhase, string> = {
   blocked: 'Tap To Start',
   failed: 'Failed',
 };
+
+const CARD_STATUS_LABELS: Record<StreamPlaybackPhase, string> = {
+  idle: 'Idle',
+  resolving: 'Waiting',
+  opening: 'Waiting',
+  buffering: 'Waiting',
+  playing: 'Playing',
+  stalled: 'Waiting',
+  reconnecting: 'Retrying',
+  blocked: 'Tap To Start',
+  failed: 'Failed',
+};
+
+const LOADING_PHASES = new Set<StreamPlaybackPhase>([
+  'resolving',
+  'opening',
+  'buffering',
+  'stalled',
+  'reconnecting',
+]);
 
 function groupSourcesByCategory(sources: LiveSource[]): [string, LiveSource[]][] {
   const groups = new Map<string, LiveSource[]>();
@@ -129,8 +150,11 @@ export function StreamSelector({
           {visibleStatuses.map(status => {
             const source = sources.find(item => item.id === status.sourceId);
             return (
-              <Badge key={status.sourceId} tone={getStatusTone(status.phase)} className="max-w-full whitespace-normal break-words">
+              <Badge key={status.sourceId} tone={getStatusTone(status.phase)} className="inline-flex max-w-full items-center gap-1.5 whitespace-normal break-words">
                 {source?.name ?? status.sourceId}: {getStatusDetail(status)}
+                {LOADING_PHASES.has(status.phase) && (
+                  <LoadingSpinner label={`${source?.name ?? status.sourceId} is ${PHASE_LABELS[status.phase].toLowerCase()}`} />
+                )}
               </Badge>
             );
           })}
@@ -150,7 +174,7 @@ export function StreamSelector({
                   const active = activeIds.has(source.id);
                   const wanted = wantedIds.has(source.id);
                   const status = statuses[source.id];
-                  const statusLabel = status && status.phase !== 'idle' ? PHASE_LABELS[status.phase] : '';
+                  const statusLabel = status && status.phase !== 'idle' ? CARD_STATUS_LABELS[status.phase] : '';
                   const looksLive = active && (!status || status.phase === 'playing');
 
                   return (

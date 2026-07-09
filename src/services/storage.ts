@@ -1,3 +1,5 @@
+import { normalizeChordSpec, type ChordSpec } from '../music/chords';
+
 const STORAGE_KEY = 'resonator-state';
 const DEFAULT_MASTER_VOLUME = 1;
 const DEFAULT_KEYBOARD_VOLUME = 3.2;
@@ -5,7 +7,7 @@ const DEFAULT_CHORD_PAD_VOLUME = 1.55;
 const DEFAULT_HIGH_PASS_FREQ = 20;
 const DEFAULT_LOW_PASS_FREQ = 20000;
 
-export type PitchSourceMode = 'bands' | 'partials';
+export type ToneMode = 'bands' | 'spectral-snap' | 'harmonic-evidence';
 
 export interface StreamSettings {
   filterQ: number;
@@ -24,6 +26,22 @@ export interface ChordPadState {
   active: boolean;
 }
 
+export type SequencerClockSource = 'internal' | 'midi';
+
+export interface ChordSequenceEvent {
+  chord: ChordSpec;
+  gate: number;
+  tieSteps: number;
+  velocity: number;
+}
+
+export interface ChordSequencerState {
+  bpm: number;
+  length: number;
+  clockSource: SequencerClockSource;
+  steps: Array<ChordSequenceEvent | null>;
+}
+
 interface SavedState {
   activeStreamIds: string[];
   streams: Record<string, StreamSettings>;
@@ -32,10 +50,16 @@ interface SavedState {
   keyboardVolume: number;
   chordPadVolume: number;
   chordPad: ChordPadState | null;
-  pitchSourceMode: PitchSourceMode;
+  chordSequencer: ChordSequencerState;
+  toneMode: ToneMode;
 }
 
-function load(): SavedState | null {
+type StoredStateInput = Partial<Omit<SavedState, 'toneMode'>> & {
+  toneMode?: unknown;
+  pitchSourceMode?: unknown;
+};
+
+function load(): StoredStateInput | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     return raw ? JSON.parse(raw) : null;
@@ -50,7 +74,13 @@ function save(state: SavedState): void {
   } catch { /* quota exceeded, etc */ }
 }
 
-function normalizeSavedState(state: Partial<SavedState> | null): SavedState {
+function normalizeToneMode(value: unknown): ToneMode {
+  // Migrate the original experimental mode name on the next saved-state write.
+  if (value === 'harmonic-evidence') return 'harmonic-evidence';
+  return value === 'spectral-snap' || value === 'partials' ? 'spectral-snap' : 'bands';
+}
+
+function normalizeSavedState(state: StoredStateInput | null): SavedState {
   const savedMasterVolume = state?.masterVolume;
   const savedKeyboardVolume = state?.keyboardVolume;
   const savedChordPadVolume = state?.chordPadVolume;
@@ -78,7 +108,8 @@ function normalizeSavedState(state: Partial<SavedState> | null): SavedState {
     chordPad: savedChordPadState && typeof savedChordPadState === 'object'
       ? normalizeChordPadState(savedChordPadState)
       : null,
-    pitchSourceMode: state?.pitchSourceMode === 'partials' ? 'partials' : 'bands',
+    chordSequencer: normalizeChordSequencerState(state?.chordSequencer),
+    toneMode: normalizeToneMode(state?.toneMode ?? state?.pitchSourceMode),
   };
 }
 
@@ -110,6 +141,41 @@ function normalizeChordPadState(state: Partial<ChordPadState>): ChordPadState {
     selectedType,
     inversion,
     active: state.active === true,
+  };
+}
+
+function normalizeChordSequenceEvent(value: unknown): ChordSequenceEvent | null {
+  if (!value || typeof value !== 'object') return null;
+  const event = value as Partial<ChordSequenceEvent>;
+  if (!event.chord || typeof event.chord !== 'object') return null;
+
+  return {
+    chord: normalizeChordSpec(event.chord),
+    gate: typeof event.gate === 'number' && Number.isFinite(event.gate)
+      ? Math.min(0.99, Math.max(0.05, event.gate))
+      : 0.5,
+    tieSteps: typeof event.tieSteps === 'number' && Number.isFinite(event.tieSteps)
+      ? Math.min(63, Math.max(0, Math.round(event.tieSteps)))
+      : 0,
+    velocity: typeof event.velocity === 'number' && Number.isFinite(event.velocity)
+      ? Math.min(127, Math.max(1, Math.round(event.velocity)))
+      : 100,
+  };
+}
+
+function normalizeChordSequencerState(state: Partial<ChordSequencerState> | null | undefined): ChordSequencerState {
+  const sourceSteps = Array.isArray(state?.steps) ? state.steps : [];
+  const steps = Array.from({ length: 64 }, (_, index) => normalizeChordSequenceEvent(sourceSteps[index]));
+
+  return {
+    bpm: typeof state?.bpm === 'number' && Number.isFinite(state.bpm)
+      ? Math.min(300, Math.max(30, state.bpm))
+      : 120,
+    length: typeof state?.length === 'number' && Number.isFinite(state.length)
+      ? Math.min(64, Math.max(1, Math.round(state.length)))
+      : 16,
+    clockSource: state?.clockSource === 'midi' ? 'midi' : 'internal',
+    steps,
   };
 }
 
@@ -190,14 +256,26 @@ export function getChordPadState(): ChordPadState | null {
   return getCurrent().chordPad;
 }
 
-export function savePitchSourceMode(pitchSourceMode: PitchSourceMode): void {
+export function saveChordSequencerState(chordSequencer: ChordSequencerState): void {
   const state = getCurrent();
-  state.pitchSourceMode = pitchSourceMode === 'partials' ? 'partials' : 'bands';
+  state.chordSequencer = normalizeChordSequencerState(chordSequencer);
   save(state);
 }
 
-export function getPitchSourceMode(): PitchSourceMode {
-  return getCurrent().pitchSourceMode;
+export function getChordSequencerState(): ChordSequencerState {
+  return getCurrent().chordSequencer;
+}
+
+export function saveToneMode(toneMode: ToneMode): void {
+  const state = getCurrent();
+  state.toneMode = toneMode === 'spectral-snap' || toneMode === 'harmonic-evidence'
+    ? toneMode
+    : 'bands';
+  save(state);
+}
+
+export function getToneMode(): ToneMode {
+  return getCurrent().toneMode;
 }
 
 export function removeStreamSettings(id: string): void {

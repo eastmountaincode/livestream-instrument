@@ -23,13 +23,44 @@ const VOICE_GAIN_BOOST = 8.0;
 const MIN_FILTER_FREQ = 20;
 const KEEPALIVE_GAIN = 0.000001;
 const KEEPALIVE_FREQ = 20;
-const PARTIAL_REFRESH_INTERVAL = 0.16;
-const PARTIAL_MIN_FREQ = 55;
-const PARTIAL_MAX_FREQ = 5000;
-const PARTIAL_MAX_DISTANCE_CENTS = 900;
-const PARTIAL_TOP_COUNT = 24;
+const ANALYSIS_FFT_SIZE = 8192;
+const ANALYSIS_REFRESH_INTERVAL = 0.075;
+const ANALYSIS_TIMER_MS = 80;
+const SPECTRAL_SNAP_MIN_FREQ = 55;
+const SPECTRAL_SNAP_MAX_FREQ = 5000;
+const SPECTRAL_SNAP_MAX_DISTANCE_CENTS = 350;
+const SPECTRAL_SNAP_TRACK_DISTANCE_CENTS = 90;
+const SPECTRAL_SNAP_MIN_LEVEL_DB = -86;
+const SPECTRAL_SNAP_NOISE_MARGIN_DB = 6;
+const SPECTRAL_SNAP_MIN_PROMINENCE_DB = 3;
+const SPECTRAL_SNAP_TOP_COUNT = 36;
+const SPECTRAL_SNAP_MAX_MISSES = 2;
+const HARMONIC_EVIDENCE_MAX_HARMONIC = 8;
+const HARMONIC_EVIDENCE_MAX_FREQ = 5000;
+const HARMONIC_EVIDENCE_PROMINENCE_FLOOR_DB = 1.5;
+const HARMONIC_EVIDENCE_FULL_SCALE_DB = 12;
+const HARMONIC_EVIDENCE_OUTPUT_SCALE = 0.65;
+const HARMONIC_EVIDENCE_MIN_GAIN = 0.4;
+const HARMONIC_EVIDENCE_SMOOTHING = 0.28;
 
-export type PitchSourceMode = 'bands' | 'partials';
+export type ToneMode = 'bands' | 'spectral-snap' | 'harmonic-evidence';
+
+interface SpectralSnapPeak {
+  frequency: number;
+  levelDb: number;
+  prominenceDb: number;
+  age: number;
+  misses: number;
+}
+
+interface HarmonicBand {
+  harmonic: number;
+  input: AudioNode;
+  filter: BiquadFilterNode;
+  gain: GainNode;
+  connected: boolean;
+  connectionToken: number;
+}
 
 interface Voice {
   note: number;
@@ -37,6 +68,9 @@ interface Voice {
   gain: GainNode;
   active: boolean;
   targetFrequency: number;
+  snappedFrequency: number | null;
+  harmonicEvidence: number;
+  harmonicBands: HarmonicBand[];
 }
 
 interface NoteSourceState {
@@ -56,9 +90,9 @@ interface StreamChannel {
   source: MediaElementAudioSourceNode;
   streamGain: GainNode;
   rawAnalyser: AnalyserNode;
-  partialBins: Uint8Array<ArrayBuffer>;
-  partialFrequencies: number[];
-  partialAnalyzedAt: number;
+  analysisBins: Float32Array<ArrayBuffer>;
+  analysisUpdatedAt: number;
+  spectralSnapPeaks: SpectralSnapPeak[];
   highPassFilter: BiquadFilterNode;
   lowPassFilter: BiquadFilterNode;
   analyser: AnalyserNode;
@@ -75,6 +109,10 @@ interface StreamChannel {
   pan: number;
 }
 
+interface RemoveStreamOptions {
+  preserveSolo?: boolean;
+}
+
 export class AudioEngine {
   ctx: AudioContext;
   masterGain: GainNode;
@@ -85,7 +123,8 @@ export class AudioEngine {
   private activeNotes: Map<number, ActiveNoteState> = new Map();
   private externalClock = false;
   private pitchBendSemitones = 0;
-  private pitchSourceMode: PitchSourceMode = 'bands';
+  private toneMode: ToneMode = 'bands';
+  private analysisTimer: number | null = null;
   private keepAliveOscillator: OscillatorNode | null = null;
   private keepAliveGain: GainNode | null = null;
 
@@ -129,7 +168,7 @@ export class AudioEngine {
 
   addStream(id: string, audioElement: HTMLAudioElement) {
     if (this.channels.has(id)) {
-      this.removeStream(id);
+      this.removeStream(id, { preserveSolo: true });
     }
 
     const source = this.ctx.createMediaElementSource(audioElement);
@@ -142,8 +181,10 @@ export class AudioEngine {
 
     const streamGain = this.ctx.createGain();
     const rawAnalyser = this.ctx.createAnalyser();
-    rawAnalyser.fftSize = 4096;
-    rawAnalyser.smoothingTimeConstant = 0.72;
+    rawAnalyser.fftSize = ANALYSIS_FFT_SIZE;
+    rawAnalyser.smoothingTimeConstant = 0.55;
+    rawAnalyser.minDecibels = -100;
+    rawAnalyser.maxDecibels = -10;
     monoOut.connect(rawAnalyser);
 
     const highPassFilter = this.ctx.createBiquadFilter();
@@ -180,7 +221,38 @@ export class AudioEngine {
       filter.connect(gain);
       gain.connect(streamGain);
 
-      voices.push({ note: -1, filter, gain, active: false, targetFrequency: 440 });
+      const harmonicBands: HarmonicBand[] = [];
+      for (let harmonic = 2; harmonic <= HARMONIC_EVIDENCE_MAX_HARMONIC; harmonic++) {
+        const harmonicFilter = this.ctx.createBiquadFilter();
+        harmonicFilter.type = 'bandpass';
+        harmonicFilter.frequency.value = 440 * harmonic;
+        harmonicFilter.Q.value = DEFAULT_Q;
+
+        const harmonicGain = this.ctx.createGain();
+        harmonicGain.gain.value = 0;
+
+        harmonicFilter.connect(harmonicGain);
+        harmonicGain.connect(gain);
+        harmonicBands.push({
+          harmonic,
+          input: monoOut,
+          filter: harmonicFilter,
+          gain: harmonicGain,
+          connected: false,
+          connectionToken: 0,
+        });
+      }
+
+      voices.push({
+        note: -1,
+        filter,
+        gain,
+        active: false,
+        targetFrequency: 440,
+        snappedFrequency: null,
+        harmonicEvidence: 0,
+        harmonicBands,
+      });
     }
 
     // Fade in
@@ -192,9 +264,9 @@ export class AudioEngine {
       source,
       streamGain,
       rawAnalyser,
-      partialBins: new Uint8Array(rawAnalyser.frequencyBinCount),
-      partialFrequencies: [],
-      partialAnalyzedAt: 0,
+      analysisBins: new Float32Array(rawAnalyser.frequencyBinCount),
+      analysisUpdatedAt: Number.NEGATIVE_INFINITY,
+      spectralSnapPeaks: [],
       highPassFilter,
       lowPassFilter,
       analyser,
@@ -218,11 +290,21 @@ export class AudioEngine {
         this.noteOnForChannel(newChannel, note, this.getEffectiveVelocity(note));
       }
     }
+
+    // A newly added channel must immediately respect any existing solo/mute
+    // routing instead of becoming briefly audible at its default gain.
+    this.applyGains();
   }
 
-  removeStream(id: string) {
+  removeStream(id: string, { preserveSolo = false }: RemoveStreamOptions = {}) {
     const ch = this.channels.get(id);
-    if (!ch) return;
+    if (!ch) {
+      if (!preserveSolo && this.soloId === id) {
+        this.soloId = null;
+        this.applyGains();
+      }
+      return;
+    }
 
     const now = this.ctx.currentTime;
     ch.streamGain.gain.cancelScheduledValues(0);
@@ -232,6 +314,15 @@ export class AudioEngine {
     setTimeout(() => {
       for (const voice of ch.voices) {
         try { voice.filter.disconnect(); } catch { /* ok */ }
+        for (const band of voice.harmonicBands) {
+          band.connectionToken += 1;
+          if (band.connected) {
+            try { band.input.disconnect(band.filter); } catch { /* ok */ }
+            band.connected = false;
+          }
+          try { band.filter.disconnect(); } catch { /* ok */ }
+          try { band.gain.disconnect(); } catch { /* ok */ }
+        }
         try { voice.gain.disconnect(); } catch { /* ok */ }
       }
       try { ch.source.disconnect(); } catch { /* ok */ }
@@ -246,12 +337,24 @@ export class AudioEngine {
     }, FADE_TIME * 1000 + 100);
 
     this.channels.delete(id);
+
+    const removedSoloChannel = this.soloId === id;
+    if (removedSoloChannel && !preserveSolo) {
+      this.soloId = null;
+    }
+
+    // Keep the remaining gains frozen only while the soloed stream is being
+    // replaced during a reconnect. Permanent removal releases the solo.
+    if (!removedSoloChannel || !preserveSolo) {
+      this.applyGains();
+    }
   }
 
   disconnectAllStreams() {
     for (const id of Array.from(this.channels.keys())) {
       this.removeStream(id);
     }
+    this.setStreamSolo(null);
   }
 
   isStreamConnected(): boolean {
@@ -266,6 +369,15 @@ export class AudioEngine {
 
   private velocityToGain(velocity: number): number {
     return (Math.max(0, velocity) / 127) * VOICE_GAIN_BOOST;
+  }
+
+  private getVoiceOutputGain(voice: Voice, velocity: number): number {
+    const baseGain = this.velocityToGain(velocity);
+    if (this.toneMode !== 'harmonic-evidence') return baseGain;
+
+    const evidenceGain = HARMONIC_EVIDENCE_MIN_GAIN
+      + (1 - HARMONIC_EVIDENCE_MIN_GAIN) * Math.sqrt(Math.max(0, Math.min(1, voice.harmonicEvidence)));
+    return baseGain * HARMONIC_EVIDENCE_OUTPUT_SCALE * evidenceGain;
   }
 
   private getEffectiveVelocity(note: number): number {
@@ -284,13 +396,13 @@ export class AudioEngine {
 
   private refreshNoteGain(note: number) {
     const now = this.ctx.currentTime;
-    const nextGain = this.velocityToGain(this.getEffectiveVelocity(note));
+    const velocity = this.getEffectiveVelocity(note);
 
     for (const [, ch] of this.channels) {
       const voice = ch.activeVoices.get(note);
       if (!voice) continue;
       voice.gain.gain.cancelScheduledValues(now);
-      voice.gain.gain.setTargetAtTime(nextGain, now, ATTACK);
+      voice.gain.gain.setTargetAtTime(this.getVoiceOutputGain(voice, velocity), now, ATTACK);
     }
   }
 
@@ -299,61 +411,342 @@ export class AudioEngine {
     return Number.isFinite(freq) ? Math.max(MIN_FILTER_FREQ, Math.min(maxFrequency, freq)) : 440;
   }
 
-  private getVoiceFrequency(ch: StreamChannel, note: number): number {
-    const target = noteToFreq(note + ch.octaveShift * 12 + this.pitchBendSemitones);
-    return this.getResolvedVoiceFrequency(ch, target);
+  private centsBetween(a: number, b: number): number {
+    if (a <= 0 || b <= 0) return Infinity;
+    return Math.abs(1200 * Math.log2(a / b));
   }
 
-  private getResolvedVoiceFrequency(ch: StreamChannel, targetFrequency: number): number {
-    const target = this.clampFilterFrequency(targetFrequency);
-    if (this.pitchSourceMode !== 'partials') return target;
-
-    const partial = this.findNearestPartial(ch, target);
-    return partial ? this.clampFilterFrequency(partial) : target;
+  private interpolateFrequency(from: number, to: number, amount: number): number {
+    if (from <= 0 || to <= 0) return to;
+    return from * Math.pow(to / from, amount);
   }
 
-  private refreshPartials(ch: StreamChannel) {
+  private refreshAnalysisBins(ch: StreamChannel): boolean {
     const now = this.ctx.currentTime;
-    if (now - ch.partialAnalyzedAt < PARTIAL_REFRESH_INTERVAL) return;
+    if (now - ch.analysisUpdatedAt < ANALYSIS_REFRESH_INTERVAL) return false;
 
-    ch.rawAnalyser.getByteFrequencyData(ch.partialBins);
-    const sampleRate = this.ctx.sampleRate;
-    const binHz = sampleRate / ch.rawAnalyser.fftSize;
-    const peaks: Array<{ frequency: number; value: number }> = [];
+    ch.rawAnalyser.getFloatFrequencyData(ch.analysisBins);
+    ch.analysisUpdatedAt = now;
+    return true;
+  }
 
-    for (let bin = 2; bin < ch.partialBins.length - 2; bin++) {
-      const frequency = bin * binHz;
-      if (frequency < PARTIAL_MIN_FREQ || frequency > PARTIAL_MAX_FREQ) continue;
+  private refreshSpectralSnapPeaks(ch: StreamChannel) {
+    if (!this.refreshAnalysisBins(ch)) return;
 
-      const value = ch.partialBins[bin];
-      if (value < 24) continue;
-      if (value < ch.partialBins[bin - 1] || value < ch.partialBins[bin + 1]) continue;
+    const binHz = this.ctx.sampleRate / ch.rawAnalyser.fftSize;
+    const minBin = Math.max(2, Math.ceil(SPECTRAL_SNAP_MIN_FREQ / binHz));
+    const maxBin = Math.min(ch.analysisBins.length - 3, Math.floor(SPECTRAL_SNAP_MAX_FREQ / binHz));
+    const finiteLevels: number[] = [];
 
-      peaks.push({ frequency, value });
+    for (let bin = minBin; bin <= maxBin; bin++) {
+      const level = ch.analysisBins[bin];
+      if (Number.isFinite(level)) finiteLevels.push(level);
     }
 
-    ch.partialFrequencies = peaks
-      .sort((a, b) => b.value - a.value)
-      .slice(0, PARTIAL_TOP_COUNT)
-      .map(peak => peak.frequency)
-      .sort((a, b) => a - b);
-    ch.partialAnalyzedAt = now;
-  }
+    finiteLevels.sort((a, b) => a - b);
+    const noiseFloor = finiteLevels.length > 0
+      ? finiteLevels[Math.floor(finiteLevels.length * 0.5)]
+      : -100;
+    const minimumLevel = Math.max(SPECTRAL_SNAP_MIN_LEVEL_DB, noiseFloor + SPECTRAL_SNAP_NOISE_MARGIN_DB);
+    const candidates: SpectralSnapPeak[] = [];
 
-  private findNearestPartial(ch: StreamChannel, targetFrequency: number): number | null {
-    this.refreshPartials(ch);
+    for (let bin = minBin; bin <= maxBin; bin++) {
+      const left = ch.analysisBins[bin - 1];
+      const center = ch.analysisBins[bin];
+      const right = ch.analysisBins[bin + 1];
+      if (!Number.isFinite(center) || center < minimumLevel) continue;
+      if (center <= left || center < right) continue;
 
-    let nearest: number | null = null;
-    let nearestDistance = Infinity;
-    for (const frequency of ch.partialFrequencies) {
-      const distance = Math.abs(1200 * Math.log2(frequency / targetFrequency));
-      if (distance < nearestDistance) {
-        nearest = frequency;
-        nearestDistance = distance;
+      const shoulderLevels = [
+        ch.analysisBins[bin - 4],
+        ch.analysisBins[bin - 3],
+        ch.analysisBins[bin + 3],
+        ch.analysisBins[bin + 4],
+      ].filter(Number.isFinite);
+      const localFloor = shoulderLevels.length > 0
+        ? shoulderLevels.reduce((sum, level) => sum + level, 0) / shoulderLevels.length
+        : noiseFloor;
+      const prominenceDb = center - localFloor;
+      if (prominenceDb < SPECTRAL_SNAP_MIN_PROMINENCE_DB) continue;
+
+      const denominator = left - 2 * center + right;
+      const offset = Math.abs(denominator) > 0.0001
+        ? Math.max(-0.5, Math.min(0.5, 0.5 * (left - right) / denominator))
+        : 0;
+
+      candidates.push({
+        frequency: (bin + offset) * binHz,
+        levelDb: center,
+        prominenceDb,
+        age: 1,
+        misses: 0,
+      });
+    }
+
+    candidates.sort((a, b) => (
+      b.levelDb + b.prominenceDb * 0.75 - (a.levelDb + a.prominenceDb * 0.75)
+    ));
+
+    const previous = ch.spectralSnapPeaks;
+    const usedPrevious = new Set<number>();
+    const tracked: SpectralSnapPeak[] = [];
+
+    for (const candidate of candidates.slice(0, SPECTRAL_SNAP_TOP_COUNT * 2)) {
+      let matchIndex = -1;
+      let matchDistance = SPECTRAL_SNAP_TRACK_DISTANCE_CENTS;
+
+      for (let index = 0; index < previous.length; index++) {
+        if (usedPrevious.has(index)) continue;
+        const distance = this.centsBetween(candidate.frequency, previous[index].frequency);
+        if (distance < matchDistance) {
+          matchIndex = index;
+          matchDistance = distance;
+        }
+      }
+
+      if (matchIndex >= 0) {
+        const match = previous[matchIndex];
+        usedPrevious.add(matchIndex);
+        tracked.push({
+          frequency: this.interpolateFrequency(match.frequency, candidate.frequency, 0.4),
+          levelDb: match.levelDb * 0.55 + candidate.levelDb * 0.45,
+          prominenceDb: match.prominenceDb * 0.55 + candidate.prominenceDb * 0.45,
+          age: Math.min(match.age + 1, 1000),
+          misses: 0,
+        });
+      } else {
+        tracked.push(candidate);
       }
     }
 
-    return nearestDistance <= PARTIAL_MAX_DISTANCE_CENTS ? nearest : null;
+    for (let index = 0; index < previous.length; index++) {
+      if (usedPrevious.has(index)) continue;
+      const peak = previous[index];
+      if (peak.misses >= SPECTRAL_SNAP_MAX_MISSES) continue;
+      tracked.push({
+        ...peak,
+        levelDb: peak.levelDb - 3,
+        prominenceDb: peak.prominenceDb * 0.75,
+        misses: peak.misses + 1,
+      });
+    }
+
+    ch.spectralSnapPeaks = tracked
+      .sort((a, b) => (
+        b.levelDb + b.prominenceDb + Math.min(b.age, 6) * 1.5
+        - (a.levelDb + a.prominenceDb + Math.min(a.age, 6) * 1.5)
+      ))
+      .slice(0, SPECTRAL_SNAP_TOP_COUNT);
+  }
+
+  private updateSpectralSnapVoicesForChannel(
+    ch: StreamChannel,
+    timeConstant = 0.05,
+  ) {
+    if (this.toneMode !== 'spectral-snap' || ch.activeVoices.size === 0) return;
+
+    this.refreshSpectralSnapPeaks(ch);
+    const voices = Array.from(ch.activeVoices.values());
+    const pairs: Array<{ voiceIndex: number; peakIndex: number; cost: number }> = [];
+
+    for (let voiceIndex = 0; voiceIndex < voices.length; voiceIndex++) {
+      const voice = voices[voiceIndex];
+      for (let peakIndex = 0; peakIndex < ch.spectralSnapPeaks.length; peakIndex++) {
+        const peak = ch.spectralSnapPeaks[peakIndex];
+        const targetDistance = this.centsBetween(peak.frequency, voice.targetFrequency);
+        if (targetDistance > SPECTRAL_SNAP_MAX_DISTANCE_CENTS) continue;
+
+        const switchDistance = voice.snappedFrequency
+          ? Math.min(this.centsBetween(peak.frequency, voice.snappedFrequency), 300)
+          : 0;
+        const stabilityBonus = Math.min(peak.age, 6) * 8;
+        const prominenceBonus = Math.min(peak.prominenceDb, 18) * 2;
+        const levelBonus = Math.max(0, Math.min(peak.levelDb - SPECTRAL_SNAP_MIN_LEVEL_DB, 36)) * 0.4;
+
+        pairs.push({
+          voiceIndex,
+          peakIndex,
+          cost: targetDistance + switchDistance * 0.35 - stabilityBonus - prominenceBonus - levelBonus,
+        });
+      }
+    }
+
+    pairs.sort((a, b) => a.cost - b.cost);
+    const assignedVoices = new Set<number>();
+    const assignedPeaks = new Set<number>();
+    const assignments = new Map<number, number>();
+
+    for (const pair of pairs) {
+      if (assignedVoices.has(pair.voiceIndex) || assignedPeaks.has(pair.peakIndex)) continue;
+      assignedVoices.add(pair.voiceIndex);
+      assignedPeaks.add(pair.peakIndex);
+      assignments.set(pair.voiceIndex, pair.peakIndex);
+    }
+
+    const now = this.ctx.currentTime;
+    voices.forEach((voice, voiceIndex) => {
+      const peakIndex = assignments.get(voiceIndex);
+      const peak = peakIndex === undefined ? null : ch.spectralSnapPeaks[peakIndex];
+      const nextFrequency = peak?.frequency ?? voice.targetFrequency;
+      voice.snappedFrequency = peak?.frequency ?? null;
+      voice.filter.frequency.setTargetAtTime(
+        this.clampFilterFrequency(nextFrequency),
+        now,
+        timeConstant,
+      );
+    });
+  }
+
+  private updateSpectralSnapVoices() {
+    if (this.toneMode !== 'spectral-snap') return;
+    for (const [, ch] of this.channels) {
+      this.updateSpectralSnapVoicesForChannel(ch, 0.05);
+    }
+  }
+
+  private measureHarmonicAtFrequency(
+    ch: StreamChannel,
+    frequency: number,
+  ): number {
+    const binHz = this.ctx.sampleRate / ch.rawAnalyser.fftSize;
+    const centerBin = Math.round(frequency / binHz);
+    if (centerBin < 3 || centerBin >= ch.analysisBins.length - 3) return 0;
+
+    let peakDb = Number.NEGATIVE_INFINITY;
+    for (let offset = -1; offset <= 1; offset++) {
+      const level = ch.analysisBins[centerBin + offset];
+      if (Number.isFinite(level)) peakDb = Math.max(peakDb, level);
+    }
+    if (!Number.isFinite(peakDb)) return 0;
+
+    const radius = Math.max(6, Math.min(48, Math.round(centerBin * 0.06)));
+    let localTotal = 0;
+    let localCount = 0;
+    for (let offset = -radius; offset <= radius; offset++) {
+      if (Math.abs(offset) <= 2) continue;
+      const bin = centerBin + offset;
+      if (bin < 0 || bin >= ch.analysisBins.length) continue;
+      const level = ch.analysisBins[bin];
+      if (!Number.isFinite(level)) continue;
+      localTotal += level;
+      localCount += 1;
+    }
+    if (localCount === 0) return 0;
+
+    // Local spectral flattening: measure the narrow peak above its broader
+    // neighborhood so bass-heavy or hissy streams do not win by default.
+    const prominenceDb = peakDb - localTotal / localCount;
+    return Math.max(0, Math.min(
+      1,
+      (prominenceDb - HARMONIC_EVIDENCE_PROMINENCE_FLOOR_DB) / HARMONIC_EVIDENCE_FULL_SCALE_DB,
+    ));
+  }
+
+  private measureHarmonicEvidence(
+    ch: StreamChannel,
+    targetFrequency: number,
+  ): { score: number; strengths: Map<number, number> } {
+    const strengths = new Map<number, number>();
+    let weightedEvidence = 0;
+    let totalWeight = 0;
+
+    for (let harmonic = 1; harmonic <= HARMONIC_EVIDENCE_MAX_HARMONIC; harmonic++) {
+      const frequency = targetFrequency * harmonic;
+      if (frequency > HARMONIC_EVIDENCE_MAX_FREQ || frequency >= this.ctx.sampleRate / 2) break;
+
+      const strength = this.measureHarmonicAtFrequency(ch, frequency);
+      const weight = 1 / harmonic;
+      strengths.set(harmonic, strength);
+      weightedEvidence += strength * weight;
+      totalWeight += weight;
+    }
+
+    return {
+      score: totalWeight > 0 ? weightedEvidence / totalWeight : 0,
+      strengths,
+    };
+  }
+
+  private configureHarmonicBands(
+    voice: Voice,
+    enabled: boolean,
+    strengths: Map<number, number> | null = null,
+    timeConstant = 0.04,
+  ) {
+    const now = this.ctx.currentTime;
+    const maxFrequency = Math.min(HARMONIC_EVIDENCE_MAX_FREQ, this.ctx.sampleRate / 2 - 1);
+
+    for (const band of voice.harmonicBands) {
+      const frequency = voice.targetFrequency * band.harmonic;
+      const active = enabled && frequency <= maxFrequency;
+      const strength = strengths?.get(band.harmonic) ?? 0;
+      const bandGain = active
+        ? (0.9 / band.harmonic) * (0.25 + strength * 0.75)
+        : 0;
+
+      if (active) {
+        band.connectionToken += 1;
+        if (!band.connected) {
+          band.input.connect(band.filter);
+          band.connected = true;
+        }
+        band.filter.frequency.setTargetAtTime(frequency, now, timeConstant);
+      } else if (band.connected) {
+        const token = ++band.connectionToken;
+        const disconnectDelayMs = Math.max(100, timeConstant * 5000);
+        window.setTimeout(() => {
+          if (band.connectionToken !== token || !band.connected) return;
+          try { band.input.disconnect(band.filter); } catch { /* ok */ }
+          band.connected = false;
+        }, disconnectDelayMs);
+      }
+      band.gain.gain.setTargetAtTime(bandGain, now, timeConstant);
+    }
+  }
+
+  private updateHarmonicEvidenceVoicesForChannel(ch: StreamChannel) {
+    if (this.toneMode !== 'harmonic-evidence' || ch.activeVoices.size === 0) return;
+    if (!this.refreshAnalysisBins(ch)) return;
+
+    const now = this.ctx.currentTime;
+    for (const [note, voice] of ch.activeVoices) {
+      const measurement = this.measureHarmonicEvidence(ch, voice.targetFrequency);
+      voice.harmonicEvidence += (
+        measurement.score - voice.harmonicEvidence
+      ) * HARMONIC_EVIDENCE_SMOOTHING;
+      this.configureHarmonicBands(voice, true, measurement.strengths, 0.06);
+
+      voice.gain.gain.cancelScheduledValues(now);
+      voice.gain.gain.setTargetAtTime(
+        this.getVoiceOutputGain(voice, this.getEffectiveVelocity(note)),
+        now,
+        0.08,
+      );
+    }
+  }
+
+  private updateAnalyzedToneVoices() {
+    if (this.toneMode === 'spectral-snap') {
+      this.updateSpectralSnapVoices();
+      return;
+    }
+    if (this.toneMode !== 'harmonic-evidence') return;
+    for (const [, ch] of this.channels) {
+      this.updateHarmonicEvidenceVoicesForChannel(ch);
+    }
+  }
+
+  private startToneAnalysis() {
+    if (this.analysisTimer !== null || typeof window === 'undefined') return;
+    this.analysisTimer = window.setInterval(() => {
+      this.updateAnalyzedToneVoices();
+    }, ANALYSIS_TIMER_MS);
+  }
+
+  private stopToneAnalysis() {
+    if (this.analysisTimer === null || typeof window === 'undefined') return;
+    window.clearInterval(this.analysisTimer);
+    this.analysisTimer = null;
   }
 
   private retuneActiveVoices(timeConstant = 0.005) {
@@ -361,9 +754,28 @@ export class AudioEngine {
     for (const [, ch] of this.channels) {
       for (const [note, voice] of ch.activeVoices) {
         voice.targetFrequency = noteToFreq(note + ch.octaveShift * 12 + this.pitchBendSemitones);
-        voice.filter.frequency.setTargetAtTime(this.getResolvedVoiceFrequency(ch, voice.targetFrequency), now, timeConstant);
+        const harmonicEvidenceEnabled = this.toneMode === 'harmonic-evidence';
+        this.configureHarmonicBands(voice, harmonicEvidenceEnabled, null, timeConstant);
+
+        if (this.toneMode !== 'spectral-snap') {
+          voice.snappedFrequency = null;
+          voice.filter.frequency.setTargetAtTime(
+            this.clampFilterFrequency(voice.targetFrequency),
+            now,
+            timeConstant,
+          );
+        }
+        if (!harmonicEvidenceEnabled) voice.harmonicEvidence = 0;
+        voice.gain.gain.setTargetAtTime(
+          this.getVoiceOutputGain(voice, this.getEffectiveVelocity(note)),
+          now,
+          0.04,
+        );
       }
     }
+
+    if (this.toneMode === 'spectral-snap') this.updateSpectralSnapVoices();
+    if (this.toneMode === 'harmonic-evidence') this.updateAnalyzedToneVoices();
   }
 
   private noteOnForChannel(ch: StreamChannel, note: number, velocity: number) {
@@ -381,19 +793,26 @@ export class AudioEngine {
       }
     }
 
-    const freq = this.getVoiceFrequency(ch, note);
+    const targetFrequency = noteToFreq(note + ch.octaveShift * 12 + this.pitchBendSemitones);
     const now = this.ctx.currentTime;
-    const velGain = this.velocityToGain(velocity);
 
     voice.note = note;
     voice.active = true;
-    voice.targetFrequency = noteToFreq(note + ch.octaveShift * 12 + this.pitchBendSemitones);
-    voice.filter.frequency.setTargetAtTime(freq, now, 0.001);
+    voice.targetFrequency = targetFrequency;
+    voice.snappedFrequency = null;
+    voice.harmonicEvidence = 0;
+    voice.filter.frequency.setTargetAtTime(this.clampFilterFrequency(targetFrequency), now, 0.001);
     voice.filter.Q.setTargetAtTime(ch.filterQ, now, 0.001);
+    for (const band of voice.harmonicBands) {
+      band.filter.Q.setTargetAtTime(ch.filterQ, now, 0.001);
+    }
+    this.configureHarmonicBands(voice, this.toneMode === 'harmonic-evidence', null, 0.001);
     voice.gain.gain.cancelScheduledValues(now);
-    voice.gain.gain.setTargetAtTime(velGain, now, ATTACK);
+    voice.gain.gain.setTargetAtTime(this.getVoiceOutputGain(voice, velocity), now, ATTACK);
 
     ch.activeVoices.set(note, voice);
+    this.updateSpectralSnapVoicesForChannel(ch, 0.04);
+    this.updateHarmonicEvidenceVoicesForChannel(ch);
   }
 
   noteOn(note: number, velocity: number = 127, source: string = 'default'): boolean {
@@ -436,7 +855,11 @@ export class AudioEngine {
     voice.active = false;
     voice.note = -1;
     voice.targetFrequency = 440;
+    voice.snappedFrequency = null;
+    voice.harmonicEvidence = 0;
+    this.configureHarmonicBands(voice, false, null, RELEASE);
     ch.activeVoices.delete(note);
+    this.updateSpectralSnapVoicesForChannel(ch, 0.05);
   }
 
   noteOff(note: number, source: string = 'default') {
@@ -497,6 +920,9 @@ export class AudioEngine {
         voice.active = false;
         voice.note = -1;
         voice.targetFrequency = 440;
+        voice.snappedFrequency = null;
+        voice.harmonicEvidence = 0;
+        this.configureHarmonicBands(voice, false, null, 0.01);
       }
       ch.activeVoices.clear();
     }
@@ -511,6 +937,9 @@ export class AudioEngine {
     const now = this.ctx.currentTime;
     for (const voice of ch.voices) {
       voice.filter.Q.setTargetAtTime(ch.filterQ, now, 0.01);
+      for (const band of voice.harmonicBands) {
+        band.filter.Q.setTargetAtTime(ch.filterQ, now, 0.01);
+      }
     }
   }
 
@@ -628,13 +1057,20 @@ export class AudioEngine {
     return this.pitchBendSemitones;
   }
 
-  setPitchSourceMode(mode: PitchSourceMode) {
-    this.pitchSourceMode = mode === 'partials' ? 'partials' : 'bands';
-    this.retuneActiveVoices(0.03);
+  setToneMode(mode: ToneMode) {
+    this.toneMode = mode === 'spectral-snap' || mode === 'harmonic-evidence'
+      ? mode
+      : 'bands';
+    if (this.toneMode === 'bands') {
+      this.stopToneAnalysis();
+    } else {
+      this.startToneAnalysis();
+    }
+    this.retuneActiveVoices(0.04);
   }
 
-  getPitchSourceMode(): PitchSourceMode {
-    return this.pitchSourceMode;
+  getToneMode(): ToneMode {
+    return this.toneMode;
   }
 
   // --- Global controls (kept for backwards compat) ---

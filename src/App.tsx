@@ -3,6 +3,7 @@ import { StreamSelector } from './components/StreamSelector';
 import { SourceBackdrop } from './components/SourceBackdrop';
 import { Keyboard } from './components/Keyboard';
 import { ChordPad } from './components/ChordPad';
+import { ChordSequencer } from './components/ChordSequencer';
 import { Visualizer } from './components/Visualizer';
 import { Controls } from './components/Controls';
 import { MidiPanel } from './components/MidiPanel';
@@ -12,11 +13,17 @@ import { Panel } from './components/ui';
 import { useStreamPlayback } from './hooks/useStreamPlayback';
 import { midiService } from './services/MidiService';
 import { audioEngine } from './services/AudioEngine';
-import { getSavedState, getKeyboardVolume, getChordPadVolume, saveActiveStreams } from './services/storage';
+import { getSavedState, getKeyboardVolume, getChordPadVolume, saveActiveStreams, saveSoloId } from './services/storage';
 import type { StreamSettings } from './services/storage';
 import { fetchAcceptedLiveSources, type LiveSource } from './services/streams';
+import {
+  DEFAULT_CHORD,
+  normalizeChordSpec,
+  type ChordPerformanceEvent,
+  type ChordSpec,
+} from './music/chords';
 
-type PanelKey = 'sources' | 'mixer' | 'keyboard' | 'chords' | 'io' | 'settings';
+type PanelKey = 'sources' | 'mixer' | 'keyboard' | 'chords' | 'io' | 'sequencer' | 'settings';
 
 const DEFAULT_DEMO_SOURCE_IDS = ['locus-usti-nad-labem-duul', 'locus-jasper-ridge'];
 const EMPTY_STREAM_SETTINGS: Record<string, Partial<StreamSettings>> = {};
@@ -46,6 +53,7 @@ function getInitialOpenPanels(): Record<PanelKey, boolean> {
     keyboard: true,
     chords: !compact,
     io: false,
+    sequencer: !compact,
     settings: false,
   };
 }
@@ -59,12 +67,29 @@ function App() {
   const restoredStreamsRef = useRef(false);
   const [started, setStarted] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [devModeEnabled, setDevModeEnabled] = useState(false);
+  const [soloId, setSoloId] = useState<string | null>(() => {
+    const savedSoloId = savedStateOnLoad?.soloId;
+    return savedSoloId && savedStateOnLoad?.activeStreamIds.includes(savedSoloId)
+      ? savedSoloId
+      : null;
+  });
   const [openPanels, setOpenPanels] = useState<Record<PanelKey, boolean>>(() => getInitialOpenPanels());
   const [keyboardVolume, setKeyboardVolume] = useState(() => getKeyboardVolume());
   const [chordPadVolume, setChordPadVolume] = useState(() => getChordPadVolume());
+  const [selectedChord, setSelectedChord] = useState<ChordSpec>(() => {
+    const savedChord = savedStateOnLoad?.chordPad;
+    return savedChord
+      ? normalizeChordSpec({ root: savedChord.selectedRoot, type: savedChord.selectedType, inversion: savedChord.inversion })
+      : DEFAULT_CHORD;
+  });
+  const [chordPerformanceEvent, setChordPerformanceEvent] = useState<ChordPerformanceEvent | null>(null);
   const [availableSources, setAvailableSources] = useState<LiveSource[]>([]);
   const [sourceLoadError, setSourceLoadError] = useState('');
   const [sourcesReady, setSourcesReady] = useState(false);
+  const handleStreamDisconnected = useCallback((sourceId: string) => {
+    setSoloId(currentSoloId => currentSoloId === sourceId ? null : currentSoloId);
+  }, []);
 
   const hasSavedStreams = savedStateOnLoad?.activeStreamIds?.length ?? 0;
   const shouldStartDemo = hasSavedStreams === 0;
@@ -77,11 +102,30 @@ function App() {
   } = useStreamPlayback({
     defaultStreamSettings: shouldStartDemo ? DEFAULT_DEMO_STREAM_SETTINGS : EMPTY_STREAM_SETTINGS,
     onConnected: () => { setLoading(false); },
+    onDisconnected: handleStreamDisconnected,
   });
   const streamConnected = activeIds.size > 0;
 
   useEffect(() => {
     midiService.init();
+  }, []);
+
+  useEffect(() => {
+    const toggleDevMode = (event: KeyboardEvent) => {
+      if (event.code !== 'KeyB' || event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
+
+      const target = event.target;
+      const isTextEntry = target instanceof HTMLTextAreaElement
+        || target instanceof HTMLSelectElement
+        || (target instanceof HTMLInputElement && !['range', 'checkbox', 'radio', 'button'].includes(target.type))
+        || (target instanceof HTMLElement && target.isContentEditable);
+
+      if (isTextEntry) return;
+      setDevModeEnabled(enabled => !enabled);
+    };
+
+    window.addEventListener('keydown', toggleDevMode);
+    return () => window.removeEventListener('keydown', toggleDevMode);
   }, []);
 
   useEffect(() => {
@@ -147,6 +191,16 @@ function App() {
   }, [wantedIds]);
 
   useEffect(() => {
+    saveSoloId(soloId);
+  }, [soloId]);
+
+  useEffect(() => {
+    if (started) {
+      audioEngine.setStreamSolo(soloId);
+    }
+  }, [soloId, started]);
+
+  useEffect(() => {
     if (!started || !('mediaSession' in navigator)) return;
     navigator.mediaSession.playbackState = activeIds.size > 0 ? 'playing' : 'none';
 
@@ -162,17 +216,13 @@ function App() {
     setLoading(false);
   }, []);
 
-  const handleRemoveSource = useCallback((sourceId: string) => {
-    disconnect(sourceId);
-  }, [disconnect]);
-
   const togglePanel = useCallback((key: PanelKey) => {
     setOpenPanels(prev => ({ ...prev, [key]: !prev[key] }));
   }, []);
 
   if (!started) {
     return (
-      <div className="instrument-ui flex min-h-screen flex-col items-center justify-center gap-6 bg-ground px-4 text-copy">
+      <div className={`instrument-ui flex min-h-screen flex-col items-center justify-center gap-6 bg-ground px-4 text-copy ${devModeEnabled ? 'dev-mode-enabled' : ''}`}>
         <div className="border border-ink bg-paper px-8 py-7 text-center">
           <h1 className="brand-title text-4xl leading-none">Cicada</h1>
         </div>
@@ -193,7 +243,10 @@ function App() {
   const shouldEqualizeTopPanels = openPanels.sources && openPanels.keyboard;
 
   return (
-    <div className="instrument-ui relative min-h-screen bg-ground text-copy">
+    <div
+      className={`instrument-ui relative min-h-screen bg-ground text-copy ${devModeEnabled ? 'dev-mode-enabled' : ''}`}
+      data-dev-mode={devModeEnabled ? 'on' : 'off'}
+    >
       <SourceBackdrop activeIds={activeIds} sources={availableSources} />
 
       <div className="sticky top-0 z-30 border-b border-ink bg-ground/95 backdrop-blur">
@@ -250,12 +303,14 @@ function App() {
         >
           <Controls
             activeSourceIds={activeIds}
+            soloId={soloId}
+            onSoloChange={setSoloId}
             sources={availableSources}
             keyboardVolume={keyboardVolume}
             chordPadVolume={chordPadVolume}
             onKeyboardVolumeChange={setKeyboardVolume}
             onChordPadVolumeChange={setChordPadVolume}
-            onRemoveSource={handleRemoveSource}
+            onRemoveSource={disconnect}
           />
         </Panel>
 
@@ -268,7 +323,13 @@ function App() {
             className="self-start"
             keepMounted
           >
-            <ChordPad streamConnected={streamConnected} inputVolume={chordPadVolume} autoPlayDefaultChord={shouldStartDemo} />
+            <ChordPad
+              streamConnected={streamConnected}
+              inputVolume={chordPadVolume}
+              autoPlayDefaultChord={shouldStartDemo}
+              onSelectionChange={setSelectedChord}
+              onPerformanceEvent={setChordPerformanceEvent}
+            />
           </Panel>
 
           <Panel
@@ -286,8 +347,23 @@ function App() {
         </div>
 
         <Panel
-          title="Settings"
+          title="Chord Sequencer"
           label="06"
+          open={openPanels.sequencer}
+          onToggle={() => togglePanel('sequencer')}
+          keepMounted
+        >
+          <ChordSequencer
+            streamConnected={streamConnected}
+            inputVolume={chordPadVolume}
+            selectedChord={selectedChord}
+            performanceEvent={chordPerformanceEvent}
+          />
+        </Panel>
+
+        <Panel
+          title="Settings"
+          label="07"
           open={openPanels.settings}
           onToggle={() => togglePanel('settings')}
         >

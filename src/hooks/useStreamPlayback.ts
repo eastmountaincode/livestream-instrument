@@ -30,6 +30,7 @@ export interface StreamPlaybackStatus {
 interface UseStreamPlaybackOptions {
   defaultStreamSettings?: Record<string, Partial<StreamSettings>>;
   onConnected?: () => void;
+  onDisconnected?: (sourceId: string) => void;
 }
 
 interface ActiveStream {
@@ -46,6 +47,11 @@ interface ActiveStream {
   hadSuccessfulPlayback: boolean;
   usingProxyFallback: boolean;
   notifiedConnected: boolean;
+}
+
+interface CleanupActiveStreamOptions {
+  removeAudioChannel?: boolean;
+  preserveSolo?: boolean;
 }
 
 export interface StreamConnectOptions {
@@ -82,6 +88,7 @@ function formatAttempt(attempt: number): string {
 export function useStreamPlayback({
   defaultStreamSettings = {},
   onConnected,
+  onDisconnected,
 }: UseStreamPlaybackOptions = {}) {
   const [activeIds, setActiveIds] = useState<Set<string>>(new Set());
   const [wantedIds, setWantedIds] = useState<Set<string>>(new Set());
@@ -89,6 +96,7 @@ export function useStreamPlayback({
   const activeStreams = useRef<Map<string, ActiveStream>>(new Map());
   const defaultsRef = useRef(defaultStreamSettings);
   const onConnectedRef = useRef(onConnected);
+  const onDisconnectedRef = useRef(onDisconnected);
 
   useEffect(() => {
     defaultsRef.current = defaultStreamSettings;
@@ -97,6 +105,10 @@ export function useStreamPlayback({
   useEffect(() => {
     onConnectedRef.current = onConnected;
   }, [onConnected]);
+
+  useEffect(() => {
+    onDisconnectedRef.current = onDisconnected;
+  }, [onDisconnected]);
 
   const setStatus = useCallback((
     sourceId: string,
@@ -121,10 +133,13 @@ export function useStreamPlayback({
     });
   }, []);
 
-  const cleanupActiveStream = useCallback((sourceId: string, removeAudioChannel = true) => {
+  const cleanupActiveStream = useCallback((
+    sourceId: string,
+    { removeAudioChannel = true, preserveSolo = false }: CleanupActiveStreamOptions = {},
+  ) => {
     const stream = activeStreams.current.get(sourceId);
     if (!stream) {
-      if (removeAudioChannel) audioEngine.removeStream(sourceId);
+      if (removeAudioChannel) audioEngine.removeStream(sourceId, { preserveSolo });
       return;
     }
 
@@ -135,7 +150,7 @@ export function useStreamPlayback({
     stream.audio.pause();
     stream.audio.removeAttribute('src');
     stream.audio.load();
-    if (removeAudioChannel) audioEngine.removeStream(sourceId);
+    if (removeAudioChannel) audioEngine.removeStream(sourceId, { preserveSolo });
     activeStreams.current.delete(sourceId);
   }, []);
 
@@ -152,13 +167,14 @@ export function useStreamPlayback({
       return next;
     });
     removeStatus(sourceId);
+    onDisconnectedRef.current?.(sourceId);
   }, [cleanupActiveStream, removeStatus]);
 
   const connect = useCallback(async (source: LiveSource, options: StreamConnectOptions = {}) => {
     if (activeStreams.current.has(source.id) && !options.reconnect) return;
 
     if (options.reconnect) {
-      cleanupActiveStream(source.id);
+      cleanupActiveStream(source.id, { preserveSolo: true });
       setActiveIds(prev => {
         const next = new Set(prev);
         next.delete(source.id);
@@ -253,6 +269,7 @@ export function useStreamPlayback({
         usingProxyFallback: stream.usingProxyFallback,
         ...mediaState,
       });
+      onDisconnectedRef.current?.(source.id);
     };
 
     const scheduleReconnect = (reason: string, delayMs = STREAM_RECONNECT_DELAY_MS) => {

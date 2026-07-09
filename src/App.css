@@ -199,6 +199,51 @@ input[type="range"]::-moz-range-track {
   transform: translateY(0.04em);
 }
 
+.dev-mode-enabled .dev-mode {
+  outline: 1px solid var(--dev-mode-color, #ff3b30);
+  outline-offset: -1px;
+}
+
+.dev-mode-coral {
+  --dev-mode-color: #ff3b30;
+}
+
+.dev-mode-orange {
+  --dev-mode-color: #ff9500;
+}
+
+.dev-mode-yellow {
+  --dev-mode-color: #a87900;
+}
+
+.dev-mode-green {
+  --dev-mode-color: #1e9e4a;
+}
+
+.dev-mode-cyan {
+  --dev-mode-color: #00a6a6;
+}
+
+.dev-mode-blue {
+  --dev-mode-color: #007aff;
+}
+
+.dev-mode-indigo {
+  --dev-mode-color: #5856d6;
+}
+
+.dev-mode-violet {
+  --dev-mode-color: #af52de;
+}
+
+.dev-mode-pink {
+  --dev-mode-color: #ff2d78;
+}
+
+.dev-mode-slate {
+  --dev-mode-color: #5c677d;
+}
+
 .instrument-ui button:focus-visible,
 .instrument-ui [role="button"]:focus-visible,
 .instrument-ui a:focus-visible,

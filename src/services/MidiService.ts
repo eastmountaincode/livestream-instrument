@@ -14,6 +14,8 @@ export type MidiUpdateCallback = () => void;
 export type MidiNoteEvent = { type: 'on' | 'off'; note: number; velocity: number };
 export type MidiPitchBendEvent = { value: number; normalized: number; semitones: number };
 export type MidiMessageEventInfo = { status: number; data: number[]; label: string; inputId?: string; inputName?: string };
+export type MidiClockEvent = { receivedAt: number };
+export type MidiTransportEvent = { type: 'start' | 'continue' | 'stop'; receivedAt: number };
 
 interface HeldMidiNote {
   count: number;
@@ -29,6 +31,8 @@ class MidiService {
   private ccCallbacks: ((cc: number, value: number) => void)[] = [];
   private noteCallbacks: ((event: MidiNoteEvent) => void)[] = [];
   private pitchBendCallbacks: ((event: MidiPitchBendEvent) => void)[] = [];
+  private clockCallbacks: ((event: MidiClockEvent) => void)[] = [];
+  private transportCallbacks: ((event: MidiTransportEvent) => void)[] = [];
   private inputVolume = 1;
   private activeNotes: Map<number, HeldMidiNote> = new Map();
   private handleMidiMessage = (event: Event) => this.handleMidiMessageEvent(event);
@@ -41,6 +45,8 @@ class MidiService {
     this.ccCallbacks ??= [];
     this.noteCallbacks ??= [];
     this.pitchBendCallbacks ??= [];
+    this.clockCallbacks ??= [];
+    this.transportCallbacks ??= [];
     this.activeNotes ??= new Map();
     this.inputVolume = Number.isFinite(this.inputVolume) ? Math.max(0, this.inputVolume) : 1;
     this.handleMidiMessage = (event: Event) => this.handleMidiMessageEvent(event);
@@ -145,6 +151,18 @@ class MidiService {
     return () => { this.pitchBendCallbacks = this.pitchBendCallbacks.filter(c => c !== cb); };
   }
 
+  onClock(cb: (event: MidiClockEvent) => void) {
+    this.migrateRuntimeState();
+    this.clockCallbacks.push(cb);
+    return () => { this.clockCallbacks = this.clockCallbacks.filter(c => c !== cb); };
+  }
+
+  onTransport(cb: (event: MidiTransportEvent) => void) {
+    this.migrateRuntimeState();
+    this.transportCallbacks.push(cb);
+    return () => { this.transportCallbacks = this.transportCallbacks.filter(c => c !== cb); };
+  }
+
   onMessage(cb: (event: MidiMessageEventInfo) => void) {
     this.migrateRuntimeState();
     this.messageCallbacks.push(cb);
@@ -211,6 +229,48 @@ class MidiService {
     for (const cb of this.pitchBendCallbacks) cb(event);
   }
 
+  private notifyClock(event: MidiClockEvent) {
+    for (const cb of this.clockCallbacks) cb(event);
+  }
+
+  private notifyTransport(event: MidiTransportEvent) {
+    for (const cb of this.transportCallbacks) cb(event);
+  }
+
+  private sendOutput(data: number[]): boolean {
+    if (!this.selectedOutput) return false;
+    try {
+      this.selectedOutput.send(data);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  sendNoteOn(note: number, velocity = 100, channel = 0): boolean {
+    return this.sendOutput([0x90 | Math.min(15, Math.max(0, channel)), Math.min(127, Math.max(0, note)), Math.min(127, Math.max(1, velocity))]);
+  }
+
+  sendNoteOff(note: number, channel = 0): boolean {
+    return this.sendOutput([0x80 | Math.min(15, Math.max(0, channel)), Math.min(127, Math.max(0, note)), 0]);
+  }
+
+  sendClock(): boolean {
+    return this.sendOutput([0xF8]);
+  }
+
+  sendStart(): boolean {
+    return this.sendOutput([0xFA]);
+  }
+
+  sendContinue(): boolean {
+    return this.sendOutput([0xFB]);
+  }
+
+  sendStop(): boolean {
+    return this.sendOutput([0xFC]);
+  }
+
   private scaleVelocity(velocity: number) {
     return Math.max(0, Math.round(velocity * this.inputVolume));
   }
@@ -239,6 +299,16 @@ class MidiService {
       inputId: input?.id,
       inputName: input?.name || input?.id,
     });
+
+    if (status === 0xF8) {
+      this.notifyClock({ receivedAt: e.timeStamp });
+    } else if (status === 0xFA) {
+      this.notifyTransport({ type: 'start', receivedAt: e.timeStamp });
+    } else if (status === 0xFB) {
+      this.notifyTransport({ type: 'continue', receivedAt: e.timeStamp });
+    } else if (status === 0xFC) {
+      this.notifyTransport({ type: 'stop', receivedAt: e.timeStamp });
+    }
 
     // Note on: 0x90-0x9F
     if ((status & 0xF0) === 0x90 && data.length >= 3) {

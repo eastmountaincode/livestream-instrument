@@ -61,9 +61,9 @@ export function TrackWaveform({ id, muted }: TrackWaveformProps) {
   return (
     <canvas
       ref={canvasRef}
-      className={`h-10 w-[92px] min-w-[92px] border-2 ${muted ? 'border-black/40 opacity-50' : 'border-black'}`}
+      className={`h-[53px] w-[92px] min-w-[92px] border-2 ${muted ? 'border-black/40 opacity-50' : 'border-black'}`}
       width={92}
-      height={40}
+      height={53}
     />
   );
 }
