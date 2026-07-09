@@ -55,7 +55,7 @@ function wait(ms: number): Promise<void> {
 }
 
 function App() {
-  const savedStateOnLoadRef = useRef(getSavedState());
+  const [savedStateOnLoad] = useState(() => getSavedState());
   const restoredStreamsRef = useRef(false);
   const [started, setStarted] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -66,7 +66,7 @@ function App() {
   const [sourceLoadError, setSourceLoadError] = useState('');
   const [sourcesReady, setSourcesReady] = useState(false);
 
-  const hasSavedStreams = savedStateOnLoadRef.current?.activeStreamIds?.length ?? 0;
+  const hasSavedStreams = savedStateOnLoad?.activeStreamIds?.length ?? 0;
   const shouldStartDemo = hasSavedStreams === 0;
   const {
     activeIds,
@@ -126,9 +126,8 @@ function App() {
     if (!started || restoredStreamsRef.current || !sourcesReady) return;
     restoredStreamsRef.current = true;
 
-    const saved = savedStateOnLoadRef.current;
-    const idsToConnect = saved?.activeStreamIds.length
-      ? saved.activeStreamIds
+    const idsToConnect = savedStateOnLoad?.activeStreamIds.length
+      ? savedStateOnLoad.activeStreamIds
       : shouldStartDemo
         ? DEFAULT_DEMO_SOURCE_IDS
         : [];
@@ -139,7 +138,7 @@ function App() {
         void connect(source);
       }
     }
-  }, [availableSources, connect, shouldStartDemo, sourcesReady, started]);
+  }, [availableSources, connect, savedStateOnLoad, shouldStartDemo, sourcesReady, started]);
 
   useEffect(() => {
     if (restoredStreamsRef.current) {

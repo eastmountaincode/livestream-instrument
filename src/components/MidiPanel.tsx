@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { midiService } from '../services/MidiService';
 import type { MidiDeviceInfo } from '../services/MidiService';
 import { Badge, SectionHeading, UiSelect } from './ui';
@@ -13,6 +13,20 @@ export function MidiPanel() {
   const [lastNote, setLastNote] = useState('');
   const [lastPitchBend, setLastPitchBend] = useState('');
   const [lastMessage, setLastMessage] = useState('');
+
+  const refreshDevices = useCallback(() => {
+    const nextInputs = midiService.getInputs();
+    setInputs(nextInputs);
+    setOutputs(midiService.getOutputs());
+    const currentInputId = midiService.getSelectedInputId();
+    if (!currentInputId && nextInputs.length > 0) {
+      midiService.selectInput(nextInputs[0].id);
+      setSelectedInput(nextInputs[0].id);
+    } else {
+      setSelectedInput(currentInputId);
+    }
+    setSelectedOutput(midiService.getSelectedOutputId());
+  }, []);
 
   useEffect(() => {
     midiService.migrateRuntimeState?.();
@@ -45,21 +59,7 @@ export function MidiPanel() {
       unsubNote();
       unsubPitchBend();
     };
-  }, []);
-
-  const refreshDevices = () => {
-    const nextInputs = midiService.getInputs();
-    setInputs(nextInputs);
-    setOutputs(midiService.getOutputs());
-    const currentInputId = midiService.getSelectedInputId();
-    if (!currentInputId && nextInputs.length > 0) {
-      midiService.selectInput(nextInputs[0].id);
-      setSelectedInput(nextInputs[0].id);
-    } else {
-      setSelectedInput(currentInputId);
-    }
-    setSelectedOutput(midiService.getSelectedOutputId());
-  };
+  }, [refreshDevices]);
 
   const selectedInputName = inputs.find(input => input.id === selectedInput)?.name;
 

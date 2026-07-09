@@ -1,18 +1,23 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Minus, Plus, X } from 'lucide-react';
 import { audioEngine } from '../services/AudioEngine';
 import type { LiveSource } from '../services/streams';
 import { midiService } from '../services/MidiService';
+import { TrackWaveform } from './TrackWaveform';
 import {
   saveStreamSettings,
   getStreamSettings,
   saveSoloId,
   getSavedState,
   getMasterVolume,
+  getPitchSourceMode,
   saveMasterVolume,
   saveKeyboardVolume,
   saveChordPadVolume,
+  savePitchSourceMode,
+  type PitchSourceMode,
 } from '../services/storage';
+import { formatCategory, formatLocalTime } from '../utils/format';
 
 interface Props {
   activeSourceIds: Set<string>;
@@ -44,31 +49,6 @@ function getTrackIndexForCc(cc: number): number {
   return TRACK_KNOB_CC_GROUPS.findIndex(group => group.includes(cc));
 }
 
-function formatLocalTime(date: Date, timeZone?: string): string {
-  if (!timeZone) return '';
-
-  try {
-    return new Intl.DateTimeFormat('en-US', {
-      timeZone,
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    }).format(date);
-  } catch {
-    return '';
-  }
-}
-
-function formatCategory(category?: string): string {
-  if (!category || category === 'uncategorized') return '';
-
-  return category
-    .split(/\s+/)
-    .filter(Boolean)
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
-}
-
 function frequencyToSliderValue(freq: number): number {
   const clamped = Math.max(MIN_EQ_FREQ, Math.min(MAX_EQ_FREQ, freq));
   const minLog = Math.log(MIN_EQ_FREQ);
@@ -88,66 +68,10 @@ function formatFrequency(freq: number): string {
   return `${Math.round(freq)}`;
 }
 
-function StreamWaveform({ id, muted }: { id: string; muted: boolean }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const rafRef = useRef<number>(0);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const analyser = audioEngine.getStreamAnalyser(id);
-    if (!canvas || !analyser) return;
-
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const data = new Uint8Array(analyser.fftSize);
-
-    const draw = () => {
-      rafRef.current = requestAnimationFrame(draw);
-      analyser.getByteTimeDomainData(data);
-
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      const centerY = Math.round(canvas.height / 2) + 0.5;
-
-      ctx.strokeStyle = muted ? 'rgba(0,0,0,0.16)' : 'rgba(0,0,0,0.26)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(0, centerY);
-      ctx.lineTo(canvas.width, centerY);
-      ctx.stroke();
-
-      ctx.strokeStyle = muted ? 'rgba(0,0,0,0.34)' : '#111';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-
-      for (let i = 0; i < data.length; i++) {
-        const x = (i / (data.length - 1)) * canvas.width;
-        const y = Math.round((data[i] / 255) * canvas.height) + 0.5;
-        if (i === 0) {
-          ctx.moveTo(x, y);
-        } else {
-          ctx.lineTo(x, y);
-        }
-      }
-
-      ctx.stroke();
-    };
-
-    draw();
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [id, muted]);
-
-  return (
-    <canvas
-      ref={canvasRef}
-      className={`h-10 w-[92px] min-w-[92px] border-2 ${muted ? 'border-black/40 opacity-50' : 'border-black'}`}
-      width={92}
-      height={40}
-    />
-  );
+function formatGain(value: number): string {
+  if (value >= 10) return `${value.toFixed(1)}x`;
+  if (value >= 1) return `${value.toFixed(2)}x`;
+  return `${Math.round(value * 100)}%`;
 }
 
 function StreamControls({
@@ -197,11 +121,6 @@ function StreamControls({
     audioEngine.setStreamMuted(id, saved.muted);
   }, [id, saved]);
 
-  useEffect(() => {
-    if (externalVolume === undefined) return;
-    setVol(externalVolume);
-  }, [externalVolume]);
-
   const persist = useCallback((overrides: Partial<{ filterQ: number; volume: number; highPassFreq: number; lowPassFreq: number; pan: number; octaveShift: number; muted: boolean }>) => {
     saveStreamSettings(id, {
       filterQ: overrides.filterQ ?? q,
@@ -213,6 +132,8 @@ function StreamControls({
       muted: overrides.muted ?? muted,
     });
   }, [id, q, vol, highPassFreq, lowPassFreq, pan, oct, muted]);
+
+  const displayedVolume = externalVolume ?? vol;
 
   return (
     <div className={`grid gap-2 border-b-2 border-black py-3 last:border-b-0 ${muted ? '[&_.sc-name]:opacity-40 [&_.sc-label]:opacity-40 [&_.sc-value]:opacity-40' : ''}`}>
@@ -247,8 +168,8 @@ function StreamControls({
         </button>
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-2 pl-0 sm:pl-9">
-        <StreamWaveform id={id} muted={muted} />
-        <label className="flex min-w-[140px] flex-1 items-center gap-1 text-black">
+        <TrackWaveform id={id} muted={muted} />
+        <label className="flex min-w-[140px] flex-1 items-center gap-1 text-black" title="Filter resonance for played notes">
           <span className="sc-label min-w-[24px] text-[11px] font-black uppercase">Q</span>
           <input
             type="range"
@@ -266,14 +187,14 @@ function StreamControls({
           />
           <span className="sc-value min-w-[30px] text-right font-mono text-[11px] font-black text-black">{q.toFixed(0)}</span>
         </label>
-        <label className="flex min-w-[150px] flex-1 items-center gap-1 text-black">
+        <label className="flex min-w-[150px] flex-1 items-center gap-1 text-black" title="Track gain">
           <span className="sc-label min-w-[28px] text-[11px] font-black uppercase">Vol</span>
           <input
             type="range"
             min="0"
             max={MAX_STREAM_VOLUME}
             step="0.01"
-            value={vol}
+            value={displayedVolume}
             className="flex-1 min-w-0"
             onChange={e => {
               const val = parseFloat(e.target.value);
@@ -282,9 +203,9 @@ function StreamControls({
               persist({ volume: val });
             }}
           />
-          <span className="sc-value min-w-[42px] text-right font-mono text-[11px] font-black text-black">{Math.round(vol * 100)}%</span>
+          <span className="sc-value min-w-[42px] text-right font-mono text-[11px] font-black text-black">{formatGain(displayedVolume)}</span>
         </label>
-        <label className="flex min-w-[140px] flex-1 items-center gap-1 text-black">
+        <label className="flex min-w-[140px] flex-1 items-center gap-1 text-black" title="Stereo position">
           <span className="sc-label min-w-[28px] text-[11px] font-black uppercase">Pan</span>
           <input
             type="range"
@@ -364,7 +285,7 @@ function StreamControls({
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-2 pl-0 sm:pl-9">
         <span className="sc-label min-w-[92px] text-[11px] font-black uppercase">Track EQ</span>
-        <label className="flex min-w-[180px] flex-1 items-center gap-1 text-black">
+        <label className="flex min-w-[180px] flex-1 items-center gap-1 text-black" title="High-pass filter">
           <span className="sc-label min-w-[24px] text-[11px] font-black uppercase">HP</span>
           <input
             type="range"
@@ -382,7 +303,7 @@ function StreamControls({
           />
           <span className="sc-value min-w-[42px] text-right font-mono text-[11px] font-black text-black">{formatFrequency(highPassFreq)}</span>
         </label>
-        <label className="flex min-w-[180px] flex-1 items-center gap-1 text-black">
+        <label className="flex min-w-[180px] flex-1 items-center gap-1 text-black" title="Low-pass filter">
           <span className="sc-label min-w-[24px] text-[11px] font-black uppercase">LP</span>
           <input
             type="range"
@@ -414,24 +335,21 @@ export function Controls({
   onChordPadVolumeChange,
   onRemoveSource,
 }: Props) {
-  const [streamIds, setStreamIds] = useState<string[]>([]);
   const [soloId, setSoloId] = useState<string | null>(() => getSavedState()?.soloId ?? null);
   const [masterVolume, setMasterVolume] = useState(() => getMasterVolume());
+  const [pitchSourceMode, setPitchSourceMode] = useState<PitchSourceMode>(() => getPitchSourceMode());
   const [midiMappedVolumes, setMidiMappedVolumes] = useState<Record<string, number>>({});
   const [clock, setClock] = useState(() => new Date());
-
-  useEffect(() => {
-    setStreamIds(Array.from(activeSourceIds));
-    // Clear solo if the soloed stream was removed
-    if (soloId && !activeSourceIds.has(soloId)) {
-      setSoloId(null);
-      audioEngine.setStreamSolo(null);
-    }
-  }, [activeSourceIds, soloId]);
+  const streamIds = useMemo(() => Array.from(activeSourceIds), [activeSourceIds]);
+  const effectiveSoloId = soloId && activeSourceIds.has(soloId) ? soloId : null;
 
   useEffect(() => {
     audioEngine.setMasterVolume(masterVolume);
   }, [masterVolume]);
+
+  useEffect(() => {
+    audioEngine.setPitchSourceMode(pitchSourceMode);
+  }, [pitchSourceMode]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -476,7 +394,7 @@ export function Controls({
           key={id}
           id={id}
           index={index}
-          soloId={soloId}
+          soloId={effectiveSoloId}
           onSolo={setSoloId}
           externalVolume={midiMappedVolumes[id]}
           sources={sources}
@@ -537,6 +455,29 @@ export function Controls({
             />
             <span className="min-w-[56px] text-right font-mono text-[11px] font-black text-black">{Math.round(chordPadVolume * 100)}%</span>
           </label>
+          <div className="flex min-w-0 items-center gap-3 text-black">
+            <span className="min-w-[64px] text-[11px] font-black uppercase">Tone</span>
+            <div className="flex border-2 border-black">
+              {(['bands', 'partials'] as const).map(mode => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={`px-2.5 py-1 font-mono text-[10px] font-black uppercase ${
+                    pitchSourceMode === mode
+                      ? 'bg-black text-white'
+                      : 'bg-white text-black hover:bg-black hover:text-white'
+                  }`}
+                  onClick={() => {
+                    setPitchSourceMode(mode);
+                    savePitchSourceMode(mode);
+                  }}
+                  title={mode === 'partials' ? 'Retune notes toward detected stream partials' : 'Use played note frequencies directly'}
+                >
+                  {mode}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
         <button
           className="mt-[1px] border-2 border-black bg-white px-3 py-1 font-mono text-[10px] font-black uppercase text-black hover:bg-black hover:text-white"

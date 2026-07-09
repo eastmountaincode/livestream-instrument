@@ -1,6 +1,7 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import type { StreamConnectOptions, StreamPlaybackPhase, StreamPlaybackStatus } from '../hooks/useStreamPlayback';
 import type { LiveSource } from '../services/streams';
+import { formatLocalTime } from '../utils/format';
 import { Badge } from './ui';
 
 interface Props {
@@ -30,24 +31,14 @@ function groupSourcesByCategory(sources: LiveSource[]): [string, LiveSource[]][]
   const groups = new Map<string, LiveSource[]>();
   for (const source of sources) {
     const category = source.category || 'uncategorized';
-    groups.set(category, [...(groups.get(category) ?? []), source]);
+    const group = groups.get(category);
+    if (group) {
+      group.push(source);
+    } else {
+      groups.set(category, [source]);
+    }
   }
   return Array.from(groups.entries()).sort(([a], [b]) => a.localeCompare(b));
-}
-
-function formatLocalTime(date: Date, timeZone?: string): string {
-  if (!timeZone) return '';
-
-  try {
-    return new Intl.DateTimeFormat('en-US', {
-      timeZone,
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    }).format(date);
-  } catch {
-    return '';
-  }
 }
 
 function getStatusTone(phase: StreamPlaybackPhase): 'default' | 'active' | 'muted' | 'warning' | 'error' {
@@ -92,14 +83,19 @@ export function StreamSelector({
   onDisconnect,
 }: Props) {
   const [clock, setClock] = useState(() => new Date());
+  const visibleStatuses = useMemo(
+    () => Object.values(statuses).filter(status => status.phase !== 'idle'),
+    [statuses],
+  );
+  const hasRetryCountdown = visibleStatuses.some(status => status.phase === 'reconnecting' && status.nextRetryAt);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
       setClock(new Date());
-    }, 1_000);
+    }, hasRetryCountdown ? 1_000 : 30_000);
 
     return () => window.clearInterval(intervalId);
-  }, []);
+  }, [hasRetryCountdown]);
 
   const toggle = useCallback((source: LiveSource) => {
     const status = statuses[source.id];
@@ -115,8 +111,7 @@ export function StreamSelector({
     }
   }, [activeIds, onConnect, onDisconnect, statuses, wantedIds]);
 
-  const groupedSources = groupSourcesByCategory(sources);
-  const visibleStatuses = Object.values(statuses).filter(status => status.phase !== 'idle');
+  const groupedSources = useMemo(() => groupSourcesByCategory(sources), [sources]);
   const hasStatusStrip = Boolean(
     sourceLoadError ||
     (sourcesReady && sources.length === 0) ||
