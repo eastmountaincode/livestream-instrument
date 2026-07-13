@@ -314,20 +314,21 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
 
   return (
     <div className="grid gap-3">
-      <div className="flex flex-wrap items-center gap-3 border-b-2 border-black pb-2">
+      <div className="flex flex-wrap items-center gap-2 border-b-2 border-black pb-2">
         <button
-          className={`min-h-10 border-2 px-3 py-1 font-mono text-[10px] font-black uppercase ${
+          className={`h-7 border-2 px-2 font-mono text-[10px] font-black uppercase ${
             latchMode
               ? 'border-black bg-black text-white'
               : 'border-black bg-white text-black hover:bg-black hover:text-white'
           }`}
           onClick={() => setLatchMode(prev => !prev)}
+          aria-pressed={latchMode}
         >
           {latchMode ? 'Latch On' : 'Latch'}
         </button>
         <div className="flex items-center gap-1 text-[11px] font-black uppercase text-black">
           <button
-            className="icon-button flex h-10 w-10 items-center justify-center border-2 border-black p-0 disabled:opacity-60"
+            className="icon-button flex h-7 w-7 items-center justify-center border-2 border-black p-0 disabled:opacity-60"
             onClick={() => nudgeBaseOctave(-1)}
             disabled={baseOctave <= MIN_BASE_OCTAVE}
             aria-label="Lower key range"
@@ -337,7 +338,7 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
           </button>
           <span>{rangeLabel}</span>
           <button
-            className="icon-button flex h-10 w-10 items-center justify-center border-2 border-black p-0 disabled:opacity-60"
+            className="icon-button flex h-7 w-7 items-center justify-center border-2 border-black p-0 disabled:opacity-60"
             onClick={() => nudgeBaseOctave(1)}
             disabled={baseOctave >= MAX_BASE_OCTAVE}
             aria-label="Raise key range"
@@ -348,7 +349,7 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
         </div>
         {latchMode && (
           <button
-            className="min-h-10 border-2 border-black bg-warning px-2.5 py-1 font-mono text-[10px] font-black uppercase text-black hover:bg-black hover:text-white"
+            className="h-7 border-2 border-black bg-warning px-2 font-mono text-[10px] font-black uppercase text-black hover:bg-black hover:text-white"
             onClick={releaseAll}
           >
             Release All
