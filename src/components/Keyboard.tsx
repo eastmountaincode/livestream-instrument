@@ -349,7 +349,7 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
         </div>
         {latchMode && (
           <button
-            className="h-7 border-2 border-black bg-warning px-2 font-mono text-[10px] font-black uppercase text-black hover:bg-black hover:text-white"
+            className="h-7 border-2 border-black bg-white px-2 font-mono text-[10px] font-black uppercase text-black hover:bg-black hover:text-white"
             onClick={releaseAll}
           >
             Release All
@@ -393,7 +393,7 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
               data-key-note={k.note}
               className={`absolute z-[2] flex h-[60%] cursor-pointer flex-col items-center justify-end border-2 border-black pb-1 ${
                 active
-                  ? 'bg-warning text-black'
+                  ? 'bg-soft text-black'
                   : 'bg-black text-white hover:bg-ink-hover'
               }`}
               style={{ left: `${leftPercent}%`, width: `${blackKeyWidthPercent}%` }}

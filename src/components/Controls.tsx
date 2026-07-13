@@ -515,12 +515,6 @@ export function Controls({
               ))}
             </div>
           </div>
-          <button
-            className="border-2 border-black bg-white px-3 py-1 font-mono text-[10px] font-black uppercase text-black hover:bg-black hover:text-white"
-            onClick={() => audioEngine.allNotesOff()}
-          >
-            All Notes Off
-          </button>
         </div>
       </div>
     </div>
