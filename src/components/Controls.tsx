@@ -89,7 +89,6 @@ function formatGain(value: number): string {
 
 function StreamControls({
   id,
-  index,
   soloId,
   onSolo,
   externalVolume,
@@ -99,7 +98,6 @@ function StreamControls({
   onRemoveSource,
 }: {
   id: string;
-  index: number;
   soloId: string | null;
   onSolo: (id: string | null) => void;
   externalVolume?: number;
@@ -153,7 +151,6 @@ function StreamControls({
   return (
     <div className={`dev-mode dev-mode-coral grid gap-3 bg-soft px-2 py-2.5 ${muted ? '[&_.sc-name]:opacity-40 [&_.sc-label]:opacity-40 [&_.sc-value]:opacity-40' : ''}`}>
       <div className="dev-mode dev-mode-orange flex min-w-0 flex-wrap items-start gap-2">
-        <span className="w-7 min-w-7 border-2 border-black bg-black px-1 py-0.5 text-center font-mono text-[10px] font-black text-white">T{index + 1}</span>
         <div className="dev-mode dev-mode-yellow flex min-w-[140px] flex-1 flex-wrap items-center gap-x-2 gap-y-1">
           <span className="sc-name min-w-0 basis-full whitespace-normal break-words text-[12px] font-black uppercase leading-snug text-black sm:basis-auto">
             {source?.name ?? id}
@@ -425,11 +422,10 @@ export function Controls({
       )}
       {streamIds.length > 0 && (
         <div className="dev-mode dev-mode-cyan grid gap-2">
-          {streamIds.map((id, index) => (
+          {streamIds.map(id => (
             <StreamControls
               key={id}
               id={id}
-              index={index}
               soloId={soloId}
               onSolo={onSoloChange}
               externalVolume={midiMappedVolumes[id]}
