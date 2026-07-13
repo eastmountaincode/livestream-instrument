@@ -281,13 +281,12 @@ export function ChordPad({
 
   return (
     <div className="grid gap-3">
-      <div className="flex flex-wrap items-center gap-3 border-b-2 border-black pb-2">
-        <h3 className="m-0 text-[11px] font-black uppercase text-black">Chord Memory</h3>
-        <div className="min-w-[68px] border-2 border-black bg-white px-2 py-1 text-center font-mono text-base font-black text-black">
+      <div className="flex flex-wrap items-center gap-2 border-b-2 border-black pb-2">
+        <div className="flex h-7 min-w-[60px] items-center justify-center border-2 border-black bg-white px-2 font-mono text-[11px] font-black text-black">
           {chordLabel}
         </div>
         <button
-          className={`border-2 px-3 py-1 font-mono text-[10px] font-black uppercase ${
+          className={`h-7 border-2 px-2 font-mono text-[10px] font-black uppercase ${
             latched
               ? 'border-black bg-black text-white'
               : 'border-black bg-white text-black hover:bg-black hover:text-white'
@@ -329,7 +328,7 @@ export function ChordPad({
           </button>
         </div>
         <button
-          className="ml-auto border-2 border-black bg-white px-2.5 py-1 font-mono text-[10px] font-black uppercase text-black hover:bg-black hover:text-white"
+          className="ml-auto h-7 border-2 border-black bg-white px-2 font-mono text-[10px] font-black uppercase text-black hover:bg-black hover:text-white"
           onClick={releaseAll}
         >Release</button>
       </div>

@@ -7,13 +7,12 @@ import { ChordSequencer } from './components/ChordSequencer';
 import { Visualizer } from './components/Visualizer';
 import { Controls } from './components/Controls';
 import { MidiPanel } from './components/MidiPanel';
-import { WebRTCPanel } from './components/WebRTCPanel';
 import { SettingsPanel } from './components/SettingsPanel';
 import { Panel } from './components/ui';
 import { useStreamPlayback } from './hooks/useStreamPlayback';
 import { midiService } from './services/MidiService';
 import { audioEngine } from './services/AudioEngine';
-import { getSavedState, getKeyboardVolume, getChordPadVolume, saveActiveStreams, saveSoloId } from './services/storage';
+import { getSavedState, getKeyboardVolume, getChordPadVolume, getChordSequencerState, saveActiveStreams, saveSoloId } from './services/storage';
 import type { StreamSettings } from './services/storage';
 import { fetchAcceptedLiveSources, type LiveSource } from './services/streams';
 import {
@@ -77,6 +76,7 @@ function App() {
   const [openPanels, setOpenPanels] = useState<Record<PanelKey, boolean>>(() => getInitialOpenPanels());
   const [keyboardVolume, setKeyboardVolume] = useState(() => getKeyboardVolume());
   const [chordPadVolume, setChordPadVolume] = useState(() => getChordPadVolume());
+  const [sequencerClockSource, setSequencerClockSource] = useState(() => getChordSequencerState().clockSource);
   const [selectedChord, setSelectedChord] = useState<ChordSpec>(() => {
     const savedChord = savedStateOnLoad?.chordPad;
     return savedChord
@@ -339,10 +339,10 @@ function App() {
             onToggle={() => togglePanel('io')}
             className="self-start"
           >
-            <div className="grid gap-3">
-              <MidiPanel />
-              <WebRTCPanel />
-            </div>
+            <MidiPanel
+              clockSource={sequencerClockSource}
+              onClockSourceChange={setSequencerClockSource}
+            />
           </Panel>
         </div>
 
@@ -358,6 +358,7 @@ function App() {
             inputVolume={chordPadVolume}
             selectedChord={selectedChord}
             performanceEvent={chordPerformanceEvent}
+            clockSource={sequencerClockSource}
           />
         </Panel>
 

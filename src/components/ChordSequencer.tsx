@@ -17,7 +17,7 @@ import {
   type ChordPerformanceEvent,
   type ChordSpec,
 } from '../music/chords';
-import { cx, UiButton, UiSelect } from './ui';
+import { cx, UiButton } from './ui';
 
 const SEQUENCER_SOURCE = 'chord-sequencer';
 const STEP_GROUP_SIZE = 16;
@@ -31,6 +31,7 @@ interface Props {
   inputVolume: number;
   selectedChord: ChordSpec;
   performanceEvent: ChordPerformanceEvent | null;
+  clockSource: SequencerClockSource;
 }
 
 interface RecordedHold {
@@ -158,12 +159,12 @@ export function ChordSequencer({
   inputVolume,
   selectedChord,
   performanceEvent,
+  clockSource,
 }: Props) {
   const [initialState] = useState(() => getChordSequencerState());
   const [steps, setSteps] = useState(() => cloneSteps(initialState.steps));
   const [bpm, setBpm] = useState(initialState.bpm);
   const [patternLength, setPatternLength] = useState(initialState.length);
-  const [clockSource, setClockSource] = useState<SequencerClockSource>(initialState.clockSource);
   const [playing, setPlaying] = useState(false);
   const [recording, setRecording] = useState(false);
   const [follow, setFollow] = useState(true);
@@ -305,6 +306,15 @@ export function ChordSequencer({
     releaseSequenceChord();
     if (broadcastTransport && clockSourceRef.current === 'internal') midiService.sendStop();
   }, [releaseSequenceChord]);
+
+  useEffect(() => {
+    if (clockSourceRef.current === clockSource) return;
+    if (playingRef.current) stopPlayback(clockSourceRef.current === 'internal');
+    clockSourceRef.current = clockSource;
+    setExternalBpm(null);
+    lastExternalClockAtRef.current = null;
+    clockPulseRef.current = 0;
+  }, [clockSource, stopPlayback]);
 
   useEffect(() => {
     if (!playing || clockSource !== 'internal') return;
@@ -507,15 +517,6 @@ export function ChordSequencer({
     }
   };
 
-  const handleClockSourceChange = (nextSource: SequencerClockSource) => {
-    if (playingRef.current) stopPlayback(clockSourceRef.current === 'internal');
-    clockSourceRef.current = nextSource;
-    setClockSource(nextSource);
-    setExternalBpm(null);
-    lastExternalClockAtRef.current = null;
-    clockPulseRef.current = 0;
-  };
-
   const undo = () => {
     const previous = historyRef.current.pop();
     if (!previous) return;
@@ -587,7 +588,7 @@ export function ChordSequencer({
             max={300}
             value={clockSource === 'midi' && externalBpm ? Math.round(externalBpm) : Math.round(bpm)}
             disabled={clockSource === 'midi'}
-            className="h-10 w-[72px] border border-ink bg-paper px-2 text-[11px] font-semibold text-copy disabled:bg-surface"
+            className="h-7 w-[64px] border border-ink bg-paper px-2 text-[10px] font-semibold text-copy disabled:bg-surface"
             onCommit={next => {
               bpmRef.current = next;
               setBpm(next);
@@ -602,21 +603,9 @@ export function ChordSequencer({
             min={1}
             max={64}
             value={patternLength}
-            className="h-10 w-[64px] border border-ink bg-paper px-2 text-[11px] font-semibold text-copy"
+            className="h-7 w-[56px] border border-ink bg-paper px-2 text-[10px] font-semibold text-copy"
             onCommit={handleLengthChange}
           />
-        </label>
-
-        <label className="grid gap-1 font-mono text-[9px] font-semibold uppercase text-muted">
-          Clock
-          <UiSelect
-            className="h-10 min-h-0"
-            value={clockSource}
-            onChange={event => handleClockSourceChange(event.target.value as SequencerClockSource)}
-          >
-            <option value="internal">Internal</option>
-            <option value="midi">MIDI</option>
-          </UiSelect>
         </label>
 
         <UiButton

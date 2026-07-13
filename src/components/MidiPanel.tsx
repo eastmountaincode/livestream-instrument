@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
 import { midiService } from '../services/MidiService';
 import type { MidiDeviceInfo } from '../services/MidiService';
-import { Badge, SectionHeading, UiSelect } from './ui';
+import type { SequencerClockSource } from '../services/storage';
+import { Badge, UiSelect } from './ui';
 
-export function MidiPanel() {
+interface Props {
+  clockSource: SequencerClockSource;
+  onClockSourceChange: (source: SequencerClockSource) => void;
+}
+
+export function MidiPanel({ clockSource, onClockSourceChange }: Props) {
   const [inputs, setInputs] = useState<MidiDeviceInfo[]>([]);
   const [outputs, setOutputs] = useState<MidiDeviceInfo[]>([]);
   const [selectedInput, setSelectedInput] = useState<string | null>(null);
@@ -66,7 +72,16 @@ export function MidiPanel() {
   if (!available) {
     return (
       <div className="grid gap-2">
-        <SectionHeading>MIDI</SectionHeading>
+        <label className="flex items-center gap-1.5 text-[10px] font-semibold uppercase text-copy">
+          Sequencer Clock
+          <UiSelect
+            value={clockSource}
+            onChange={event => onClockSourceChange(event.target.value as SequencerClockSource)}
+          >
+            <option value="internal">Internal</option>
+            <option value="midi">MIDI</option>
+          </UiSelect>
+        </label>
         <p className="m-0 text-[11px] font-medium uppercase text-muted">Web MIDI not available</p>
       </div>
     );
@@ -74,25 +89,8 @@ export function MidiPanel() {
 
   return (
     <div className="grid gap-2">
-      <SectionHeading>MIDI</SectionHeading>
-      <p className="m-0 text-[10px] font-medium uppercase text-muted">
-        Plug in a MIDI keyboard to play.
-      </p>
-      <div className="flex min-h-[24px] flex-wrap gap-1">
-        <Badge tone={inputs.length > 0 ? 'active' : 'muted'}>
-          {inputs.length > 0 ? `${inputs.length} Input${inputs.length > 1 ? 's' : ''} Detected` : 'No Input Detected'}
-        </Badge>
-        {selectedInputName && (
-          <Badge>
-            {selectedInputName}
-          </Badge>
-        )}
-        {lastNote && <Badge tone="muted">{lastNote}</Badge>}
-        {lastPitchBend && <Badge tone="muted" className="font-mono">{lastPitchBend}</Badge>}
-        {lastMessage && <Badge tone="muted" className="font-mono">{lastMessage}</Badge>}
-      </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <label className="flex items-center gap-1.5 text-[11px] font-semibold uppercase text-copy">
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="grid gap-1 text-[9px] font-semibold uppercase text-muted">
           Input
           <UiSelect
             value={selectedInput || ''}
@@ -105,7 +103,7 @@ export function MidiPanel() {
             {inputs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
           </UiSelect>
         </label>
-        <label className="flex items-center gap-1.5 text-[11px] font-semibold uppercase text-copy">
+        <label className="grid gap-1 text-[9px] font-semibold uppercase text-muted">
           Output
           <UiSelect
             value={selectedOutput || ''}
@@ -118,7 +116,26 @@ export function MidiPanel() {
             {outputs.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
           </UiSelect>
         </label>
+        <label className="grid gap-1 text-[9px] font-semibold uppercase text-muted">
+          Sequencer Clock
+          <UiSelect
+            value={clockSource}
+            onChange={event => onClockSourceChange(event.target.value as SequencerClockSource)}
+          >
+            <option value="internal">Internal</option>
+            <option value="midi">MIDI</option>
+          </UiSelect>
+        </label>
+      </div>
+      <div className="flex min-h-[22px] flex-wrap gap-1">
+        <Badge tone={inputs.length > 0 ? 'active' : 'muted'}>
+          {inputs.length > 0 ? `${inputs.length} Input${inputs.length > 1 ? 's' : ''} Detected` : 'No Input Detected'}
+        </Badge>
+        {selectedInputName && <Badge>{selectedInputName}</Badge>}
         {lastCC && <Badge tone="muted" className="font-mono">{lastCC}</Badge>}
+        {lastNote && <Badge tone="muted">{lastNote}</Badge>}
+        {lastPitchBend && <Badge tone="muted" className="font-mono">{lastPitchBend}</Badge>}
+        {lastMessage && <Badge tone="muted" className="font-mono">{lastMessage}</Badge>}
       </div>
     </div>
   );

@@ -58,8 +58,7 @@ export function UiButton({ className, type, ...props }: ButtonHTMLAttributes<HTM
     <button
       type={type ?? 'button'}
       className={cx(
-        'border border-ink bg-paper px-3.5 py-[5px] font-mono text-[11px] font-semibold uppercase text-copy hover:bg-ink hover:text-paper disabled:opacity-30',
-        'min-h-10',
+        'h-7 border border-ink bg-paper px-2 font-mono text-[10px] font-semibold uppercase text-copy hover:bg-ink hover:text-paper disabled:opacity-30',
         className,
       )}
       {...props}
@@ -109,7 +108,7 @@ export function MinorHeading({ className, ...props }: HTMLAttributes<HTMLHeading
 export function UiSelect({ className, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <select
-      className={cx('min-h-10 border border-ink bg-paper px-1.5 py-[3px] font-mono text-[11px] font-medium text-copy', className)}
+      className={cx('h-7 min-h-0 border border-ink bg-paper px-1.5 font-mono text-[10px] font-medium text-copy', className)}
       {...props}
     />
   );
