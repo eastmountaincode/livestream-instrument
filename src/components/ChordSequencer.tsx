@@ -669,8 +669,8 @@ export function ChordSequencer({
               key={index}
               type="button"
               className={cx(
-                'sequencer-step relative grid min-h-14 content-between px-1.5 py-1.5 text-left font-mono outline-none transition-none',
-                isSelected ? 'border-2' : 'border',
+                'sequencer-step relative grid min-h-14 content-between border px-1.5 py-1.5 text-left font-mono outline-none transition-none',
+                isSelected && 'sequencer-step-selected',
                 !insidePattern && 'border-ink/25 bg-surface text-muted opacity-35',
                 insidePattern && !event && 'border-ink bg-paper text-copy hover:bg-soft',
                 insidePattern && isOnset && 'border-ink bg-accent text-copy',
