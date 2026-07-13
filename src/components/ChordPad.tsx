@@ -397,11 +397,11 @@ export function ChordPad({
         </div>
       ))}
 
-      {/* Quick root+chord grid: all 12 roots as rows, common chords as columns */}
+      {/* Root+chord grid: all 12 roots as rows, common chords as columns */}
       <div className="overflow-x-auto border-2 border-black">
         <div className="min-w-[520px]">
         <div className="flex border-b-2 border-black bg-soft">
-          <span className="min-w-[36px] px-1 py-[3px] text-center text-[9px] font-black uppercase text-black/55">Quick</span>
+          <span className="min-w-[36px] px-1 py-[3px]" aria-hidden="true" />
           {['maj', 'min', 'maj7', 'min7', 'min9', 'min11', 'sus4'].map(type => (
             <span key={type} className="flex-1 px-0.5 py-[3px] text-center text-[9px] font-black text-black/60">{CHORD_TYPES[type].short || 'M'}</span>
           ))}
@@ -427,7 +427,7 @@ export function ChordPad({
                 onPointerCancel={handleChordPointerEnd}
                 onKeyDown={event => handleChordKeyDown(event, semitone, type)}
                 onKeyUp={handleChordKeyUp}
-                aria-label={`Quick play ${name} ${CHORD_TYPES[type].label}`}
+                aria-label={`Play ${name} ${CHORD_TYPES[type].label}`}
                 aria-pressed={activeChordKey === chordKey(semitone, type)}
               >
                 {name}{CHORD_TYPES[type].short || ''}
