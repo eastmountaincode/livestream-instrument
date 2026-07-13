@@ -730,7 +730,7 @@ export function ChordSequencer({
                 max={maximumSelectedTie + 1}
                 value={editorEvent.tieSteps + 1}
                 aria-label="Event length in steps"
-                className="col-span-2 h-8 w-full border border-ink bg-paper px-2 font-mono text-[11px] font-semibold text-copy max-sm:h-10"
+                className="col-span-2 h-7 w-full border border-ink bg-paper px-2 font-mono text-[11px] font-semibold text-copy"
                 disabled={!selectedEvent}
                 onCommit={nextLength => updateSelectedEvent({ tieSteps: nextLength - 1 })}
               />

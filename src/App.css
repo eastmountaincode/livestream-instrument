@@ -69,8 +69,8 @@
 input[type="range"] {
   -webkit-appearance: none;
   appearance: none;
-  height: 12px;
-  min-height: 32px;
+  height: 1.75rem;
+  min-height: 1.75rem;
   background: var(--color-paper);
   border: 1px solid var(--color-ink);
   border-radius: 0;
@@ -81,7 +81,7 @@ input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
   width: 18px;
-  height: 28px;
+  height: 24px;
   border-radius: 0;
   background: var(--color-ink);
   cursor: pointer;
@@ -94,7 +94,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 input[type="range"]::-moz-range-thumb {
   width: 18px;
-  height: 28px;
+  height: 24px;
   border-radius: 0;
   background: var(--color-ink);
   cursor: pointer;
@@ -266,20 +266,4 @@ input[type="range"]::-moz-range-track {
 .instrument-ui button:active:not(:disabled),
 .instrument-ui [role="button"]:active:not([aria-disabled="true"]) {
   transform: translateY(1px);
-}
-
-@media (max-width: 640px) {
-  input[type="range"] {
-    min-height: 40px;
-  }
-
-  input[type="range"]::-webkit-slider-thumb {
-    width: 24px;
-    height: 34px;
-  }
-
-  input[type="range"]::-moz-range-thumb {
-    width: 24px;
-    height: 34px;
-  }
 }
