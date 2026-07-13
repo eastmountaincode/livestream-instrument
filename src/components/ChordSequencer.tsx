@@ -201,6 +201,12 @@ export function ChordSequencer({
   const maximumSelectedTie = selectedStep === null
     ? 0
     : getMaximumTieSteps(steps, selectedStep, patternLength);
+  const editorEvent = selectedEvent ?? {
+    chord: normalizeChordSpec(selectedChord),
+    gate: DEFAULT_GATE,
+    tieSteps: 0,
+    velocity: DEFAULT_VELOCITY,
+  };
   const activePageCount = Math.max(1, Math.ceil(patternLength / STEP_GROUP_SIZE));
 
   useEffect(() => {
@@ -621,7 +627,6 @@ export function ChordSequencer({
         </UiButton>
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <span className="font-mono text-[10px] font-semibold uppercase text-muted">Current {currentChordLabel}</span>
           <UiButton onClick={undo} disabled={!canUndo}>Undo</UiButton>
           <UiButton onClick={clearPattern}>Clear</UiButton>
         </div>
@@ -664,14 +669,13 @@ export function ChordSequencer({
               key={index}
               type="button"
               className={cx(
-                'relative grid min-h-14 content-between border px-1.5 py-1.5 text-left font-mono transition-none',
-                index % 4 === 0 ? 'border-l-2' : '',
+                'sequencer-step relative grid min-h-14 content-between px-1.5 py-1.5 text-left font-mono outline-none transition-none',
+                isSelected ? 'border-2' : 'border',
                 !insidePattern && 'border-ink/25 bg-surface text-muted opacity-35',
                 insidePattern && !event && 'border-ink bg-paper text-copy hover:bg-soft',
                 insidePattern && isOnset && 'border-ink bg-muted text-paper',
                 insidePattern && isContinuation && 'border-ink bg-accent text-copy',
                 isCurrent && '!bg-warning !text-copy',
-                isSelected && 'outline-2 outline-offset-2 outline-ink',
               )}
               disabled={!insidePattern}
               onClick={() => handleStepClick(index)}
@@ -683,7 +687,7 @@ export function ChordSequencer({
             >
               <span className="text-[9px] font-semibold opacity-70">{index + 1}</span>
               <span className="truncate text-[10px] font-semibold">
-                {event ? (isOnset ? getChordLabel(event.chord) : 'Tie') : '—'}
+                {event ? (isOnset ? getChordLabel(event.chord) : 'Tie') : ''}
               </span>
             </button>
           );
@@ -691,55 +695,63 @@ export function ChordSequencer({
       </div>
 
       <div className="dev-mode dev-mode-indigo grid gap-2 border-t border-ink pt-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
-        {selectedEvent ? (
-          <div className="grid gap-2 sm:grid-cols-3">
+        <div className="relative">
+          <div
+            className={cx('grid grid-cols-3 gap-2', !selectedEvent && 'invisible')}
+            aria-hidden={!selectedEvent}
+          >
             <label className="grid grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-[9px] font-semibold uppercase text-muted">
               <span>Gate</span>
-              <span className="font-mono text-[10px] text-copy">{Math.round(selectedEvent.gate * 100)}%</span>
+              <span className="font-mono text-[10px] text-copy">{Math.round(editorEvent.gate * 100)}%</span>
               <input
                 type="range"
                 min="5"
                 max="99"
                 step="1"
-                value={Math.round(selectedEvent.gate * 100)}
+                value={Math.round(editorEvent.gate * 100)}
                 className="col-span-2 w-full"
+                disabled={!selectedEvent}
                 onChange={event => updateSelectedEvent({ gate: Number(event.target.value) / 100 })}
               />
             </label>
 
             <label className="grid grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-[9px] font-semibold uppercase text-muted">
               <span>Length</span>
-              <span className="font-mono text-[10px] text-copy">{selectedEvent.tieSteps + 1} Steps</span>
+              <span className="font-mono text-[10px] text-copy">{editorEvent.tieSteps + 1} Steps</span>
               <DraftIntegerInput
-                key={`event-length-${selectedStep}-${selectedEvent.tieSteps + 1}`}
+                key={`event-length-${selectedStep}-${editorEvent.tieSteps + 1}`}
                 min={1}
                 max={maximumSelectedTie + 1}
-                value={selectedEvent.tieSteps + 1}
+                value={editorEvent.tieSteps + 1}
                 aria-label="Event length in steps"
                 className="col-span-2 h-8 w-full border border-ink bg-paper px-2 font-mono text-[11px] font-semibold text-copy max-sm:h-10"
+                disabled={!selectedEvent}
                 onCommit={nextLength => updateSelectedEvent({ tieSteps: nextLength - 1 })}
               />
             </label>
 
             <label className="grid grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-[9px] font-semibold uppercase text-muted">
               <span>Velocity</span>
-              <span className="font-mono text-[10px] text-copy">{selectedEvent.velocity}</span>
+              <span className="font-mono text-[10px] text-copy">{editorEvent.velocity}</span>
               <input
                 type="range"
                 min="1"
                 max="127"
                 step="1"
-                value={selectedEvent.velocity}
+                value={editorEvent.velocity}
                 className="col-span-2 w-full"
+                disabled={!selectedEvent}
                 onChange={event => updateSelectedEvent({ velocity: Number(event.target.value) })}
               />
             </label>
           </div>
-        ) : (
-          <p className="m-0 self-center text-[10px] font-semibold uppercase text-muted">
+
+          {!selectedEvent && (
+            <p className="absolute inset-0 m-0 flex items-center text-[10px] font-semibold uppercase text-muted">
             Choose a step to edit or assign {currentChordLabel}.
-          </p>
-        )}
+            </p>
+          )}
+        </div>
 
         <div className="flex flex-wrap gap-1 lg:justify-end">
           <UiButton

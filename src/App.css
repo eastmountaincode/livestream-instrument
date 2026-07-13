@@ -254,6 +254,11 @@ input[type="range"]::-moz-range-track {
   outline-offset: 2px;
 }
 
+.instrument-ui .sequencer-step:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: -2px;
+}
+
 .instrument-ui button:active:not(:disabled),
 .instrument-ui [role="button"]:active:not([aria-disabled="true"]) {
   transform: translateY(1px);
