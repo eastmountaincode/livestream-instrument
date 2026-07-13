@@ -782,11 +782,6 @@ export function ChordSequencer({
         </div>
       </div>
 
-      {!streamConnected && (
-        <p className="m-0 border border-ink bg-highlight px-2 py-1 text-[10px] font-semibold uppercase text-muted">
-          Select a live source for internal playback. A selected MIDI output can still receive the sequence.
-        </p>
-      )}
     </div>
   );
 }
