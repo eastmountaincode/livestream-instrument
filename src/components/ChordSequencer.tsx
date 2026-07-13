@@ -98,6 +98,10 @@ function clampInteger(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, Math.round(value)));
 }
 
+function notesMatch(left: number[], right: number[]): boolean {
+  return left.length === right.length && left.every((note, index) => note === right[index]);
+}
+
 interface DraftIntegerInputProps extends Omit<
   InputHTMLAttributes<HTMLInputElement>,
   'type' | 'value' | 'min' | 'max' | 'step' | 'onChange' | 'onBlur' | 'onKeyDown'
@@ -255,10 +259,18 @@ export function ChordSequencer({
     return 60_000 / bpmRef.current / 4;
   }, []);
 
-  const playSequenceEvent = useCallback((event: ChordSequenceEvent) => {
+  const playSequenceEvent = useCallback((event: ChordSequenceEvent, sustainsAcrossLoop: boolean) => {
+    const notes = buildChordNotes(event.chord);
+    if (sustainsAcrossLoop && notesMatch(activeNotesRef.current.notes, notes)) {
+      if (noteOffTimerRef.current !== null) {
+        window.clearTimeout(noteOffTimerRef.current);
+        noteOffTimerRef.current = null;
+      }
+      return;
+    }
+
     releaseSequenceChord();
 
-    const notes = buildChordNotes(event.chord);
     const acceptedNotes: number[] = [];
     const internalVelocity = scaleChordVelocity(event.velocity, inputVolumeRef.current);
 
@@ -271,6 +283,8 @@ export function ChordSequencer({
     }
 
     activeNotesRef.current = { notes, acceptedNotes };
+    if (sustainsAcrossLoop) return;
+
     const durationMs = Math.max(12, (event.tieSteps + event.gate) * getStepDurationMs());
     noteOffTimerRef.current = window.setTimeout(releaseSequenceChord, durationMs);
   }, [getStepDurationMs, releaseSequenceChord]);
@@ -282,7 +296,11 @@ export function ChordSequencer({
     if (followRef.current) setPage(Math.floor(normalizedIndex / STEP_GROUP_SIZE));
 
     const event = stepsRef.current[normalizedIndex];
-    if (event) playSequenceEvent(event);
+    if (event) {
+      const sustainsAcrossLoop = normalizedIndex === 0
+        && event.tieSteps >= patternLengthRef.current - 1;
+      playSequenceEvent(event, sustainsAcrossLoop);
+    }
   }, [playSequenceEvent]);
 
   const advanceStep = useCallback(() => {
