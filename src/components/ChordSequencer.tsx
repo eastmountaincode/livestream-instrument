@@ -556,8 +556,8 @@ export function ChordSequencer({
   );
 
   return (
-    <div className="dev-mode dev-mode-slate grid gap-3">
-      <div className="dev-mode dev-mode-orange flex flex-wrap items-end gap-2 border-b border-ink pb-3">
+    <div className="dev-mode dev-mode-slate grid gap-2">
+      <div className="dev-mode dev-mode-orange flex flex-wrap items-end gap-2 border-b border-ink pb-2">
         <UiButton
           className={playing ? '!bg-ink !text-paper' : ''}
           onClick={() => beginPlayback(true, true)}
@@ -619,9 +619,6 @@ export function ChordSequencer({
           </UiSelect>
         </label>
 
-        <div className="grid h-10 content-center border border-ink bg-surface px-2 font-mono text-[10px] font-semibold uppercase text-copy">
-          Division 1/16
-        </div>
         <UiButton
           className={follow ? '!bg-ink !text-paper' : ''}
           onClick={() => {
@@ -661,9 +658,6 @@ export function ChordSequencer({
             </button>
           );
         })}
-        <span className="ml-auto font-mono text-[9px] font-semibold uppercase text-muted">
-          Page {page + 1}/{activePageCount} · Autosaved
-        </span>
       </div>
 
       <div className="dev-mode dev-mode-cyan grid grid-cols-4 gap-1 sm:grid-cols-8 lg:grid-cols-16">
@@ -681,11 +675,11 @@ export function ChordSequencer({
               key={index}
               type="button"
               className={cx(
-                'relative grid min-h-16 content-between border px-1.5 py-1.5 text-left font-mono transition-none',
+                'relative grid min-h-14 content-between border px-1.5 py-1.5 text-left font-mono transition-none',
                 index % 4 === 0 ? 'border-l-2' : '',
                 !insidePattern && 'border-ink/25 bg-surface text-muted opacity-35',
                 insidePattern && !event && 'border-ink bg-paper text-copy hover:bg-soft',
-                insidePattern && isOnset && 'border-ink bg-ink text-paper',
+                insidePattern && isOnset && 'border-ink bg-muted text-paper',
                 insidePattern && isContinuation && 'border-ink bg-accent text-copy',
                 isCurrent && '!bg-warning !text-copy',
                 isSelected && 'outline-2 outline-offset-2 outline-ink',
@@ -698,26 +692,18 @@ export function ChordSequencer({
               aria-pressed={isOnset}
               aria-current={isCurrent ? 'step' : undefined}
             >
-              <span className="text-[9px] font-semibold opacity-70">{String(index + 1).padStart(2, '0')}</span>
+              <span className="text-[9px] font-semibold opacity-70">{index + 1}</span>
               <span className="truncate text-[10px] font-semibold">
                 {event ? (isOnset ? getChordLabel(event.chord) : 'Tie') : '—'}
               </span>
-              <span className={cx('h-1 w-full', event ? 'bg-current' : 'bg-transparent')} aria-hidden="true" />
             </button>
           );
         })}
       </div>
 
-      <div className="dev-mode dev-mode-indigo grid gap-3 border-t border-ink pt-3 lg:grid-cols-[minmax(180px,0.7fr)_minmax(0,2fr)_auto] lg:items-end">
-        <div className="grid gap-1">
-          <span className="text-[9px] font-semibold uppercase text-muted">Selected Event</span>
-          <strong className="font-mono text-sm uppercase text-copy">
-            {selectedStep === null ? 'Choose a step' : `Step ${selectedStep + 1} · ${selectedEvent ? getChordLabel(selectedEvent.chord) : 'Empty'}`}
-          </strong>
-        </div>
-
+      <div className="dev-mode dev-mode-indigo grid gap-2 border-t border-ink pt-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
         {selectedEvent ? (
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-2 sm:grid-cols-3">
             <label className="grid grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-[9px] font-semibold uppercase text-muted">
               <span>Gate</span>
               <span className="font-mono text-[10px] text-copy">{Math.round(selectedEvent.gate * 100)}%</span>
@@ -741,7 +727,7 @@ export function ChordSequencer({
                 max={maximumSelectedTie + 1}
                 value={selectedEvent.tieSteps + 1}
                 aria-label="Event length in steps"
-                className="col-span-2 h-10 w-full border border-ink bg-paper px-2 font-mono text-[11px] font-semibold text-copy"
+                className="col-span-2 h-8 w-full border border-ink bg-paper px-2 font-mono text-[11px] font-semibold text-copy max-sm:h-10"
                 onCommit={nextLength => updateSelectedEvent({ tieSteps: nextLength - 1 })}
               />
             </label>
@@ -761,8 +747,8 @@ export function ChordSequencer({
             </label>
           </div>
         ) : (
-          <p className="m-0 text-[10px] font-semibold uppercase text-muted">
-            Click an empty step to assign {currentChordLabel}. Record captures Chord Pad or MIDI note presses and their hold length.
+          <p className="m-0 self-center text-[10px] font-semibold uppercase text-muted">
+            Choose a step to edit or assign {currentChordLabel}.
           </p>
         )}
 
