@@ -338,7 +338,7 @@ export function ChordPad({
         {ROOT_NOTES.map(({ name, semitone }) => (
           <button
             key={semitone}
-            className={`min-h-10 border-2 px-0.5 py-1.5 text-center font-mono text-[11px] font-black ${
+            className={`h-7 border-2 px-0.5 text-center font-mono text-[11px] font-black ${
               selectedRoot === semitone
                 ? 'border-black bg-black text-white'
                 : name.includes('#')
@@ -370,7 +370,7 @@ export function ChordPad({
               return (
                 <button
                   key={type}
-                  className={`min-h-10 min-w-[56px] border-2 px-2 py-[5px] text-center font-mono text-[10px] font-black ${
+                  className={`h-7 min-w-[56px] border-2 px-2 text-center font-mono text-[10px] font-black ${
                     active
                       ? 'border-black bg-black text-white'
                       : selected
