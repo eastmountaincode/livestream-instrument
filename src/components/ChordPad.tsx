@@ -437,8 +437,6 @@ export function ChordPad({
         ))}
         </div>
       </div>
-
-      {!streamConnected && <p className="m-0 border-2 border-black px-2 py-1 text-[10px] font-black uppercase text-black/55">Select a live source first</p>}
     </div>
   );
 }
