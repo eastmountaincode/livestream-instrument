@@ -627,9 +627,9 @@ export function ChordSequencer({
 
         <span
           className="flex h-7 items-center px-1 font-mono text-[10px] font-semibold text-copy"
-          aria-label={`Selected chord: ${currentChordLabel}`}
+          aria-label={`Currently selected chord: ${currentChordLabel}`}
         >
-          {currentChordLabel}
+          Currently selected chord: {currentChordLabel}
         </span>
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
