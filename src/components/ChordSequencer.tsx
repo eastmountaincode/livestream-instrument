@@ -10,8 +10,10 @@ import {
 import { webrtcService } from '../services/WebRTCService';
 import {
   buildChordNotes,
+  DEFAULT_CHORD_VELOCITY,
   getChordLabel,
   normalizeChordSpec,
+  scaleChordVelocity,
   type ChordPerformanceEvent,
   type ChordSpec,
 } from '../music/chords';
@@ -22,7 +24,7 @@ const STEP_GROUP_SIZE = 16;
 const MAX_STEPS = 64;
 const MIDI_CLOCKS_PER_STEP = 6;
 const DEFAULT_GATE = 0.5;
-const DEFAULT_VELOCITY = 100;
+const DEFAULT_VELOCITY = DEFAULT_CHORD_VELOCITY;
 
 interface Props {
   streamConnected: boolean;
@@ -251,7 +253,7 @@ export function ChordSequencer({
 
     const notes = buildChordNotes(event.chord);
     const acceptedNotes: number[] = [];
-    const internalVelocity = Math.min(127, Math.max(1, Math.round(event.velocity * inputVolumeRef.current)));
+    const internalVelocity = scaleChordVelocity(event.velocity, inputVolumeRef.current);
 
     for (const note of notes) {
       if (streamConnectedRef.current && audioEngine.noteOn(note, internalVelocity, SEQUENCER_SOURCE)) {

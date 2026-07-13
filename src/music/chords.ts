@@ -46,6 +46,7 @@ export const CHORD_TYPES: Record<string, ChordDefinition> = {
 export const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 export const ROOT_NOTES = NOTE_NAMES.map((name, semitone) => ({ name, semitone }));
 export const DEFAULT_CHORD: ChordSpec = { root: 5, type: 'min11', inversion: 0 };
+export const DEFAULT_CHORD_VELOCITY = 100;
 
 export const CHORD_GROUPS: { label: string; types: string[] }[] = [
   { label: 'Triads', types: ['maj', 'min', 'dim', 'aug', 'sus2', 'sus4', 'power'] },
@@ -78,6 +79,12 @@ export function chordKey(root: number, type: string): string {
 export function getChordLabel(chord: ChordSpec): string {
   const normalized = normalizeChordSpec(chord);
   return `${NOTE_NAMES[normalized.root]}${CHORD_TYPES[normalized.type]?.short || ''}`;
+}
+
+export function scaleChordVelocity(velocity: number, inputVolume: number): number {
+  const safeVelocity = Number.isFinite(velocity) ? Math.max(0, velocity) : 0;
+  const safeInputVolume = Number.isFinite(inputVolume) ? Math.max(0, inputVolume) : 0;
+  return Math.round(safeVelocity * safeInputVolume);
 }
 
 export function buildChordNotes(chord: ChordSpec, octave = 3): number[] {

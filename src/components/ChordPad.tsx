@@ -10,9 +10,11 @@ import {
   chordKey,
   clampInversion,
   DEFAULT_CHORD,
+  DEFAULT_CHORD_VELOCITY,
   getChordLabel,
   NOTE_NAMES,
   ROOT_NOTES,
+  scaleChordVelocity,
   type ChordPerformanceEvent,
   type ChordSpec,
 } from '../music/chords';
@@ -96,10 +98,10 @@ export function ChordPad({
     audioEngine.allNotesOff(CHORD_PAD_SOURCE);
 
     for (const n of notes) {
-      const scaledVelocity = Math.max(0, Math.round(100 * inputVolume));
+      const scaledVelocity = scaleChordVelocity(DEFAULT_CHORD_VELOCITY, inputVolume);
       const accepted = audioEngine.noteOn(n, scaledVelocity, CHORD_PAD_SOURCE);
       if (!accepted) continue;
-      webrtcService.sendNoteOn(n, 100);
+      webrtcService.sendNoteOn(n, DEFAULT_CHORD_VELOCITY);
       acceptedNotes.push(n);
     }
     prevNotes.current = acceptedNotes;
@@ -166,7 +168,7 @@ export function ChordPad({
   }, [latched, releaseAll]);
 
   useEffect(() => {
-    const scaledVelocity = Math.max(0, Math.round(100 * inputVolume));
+    const scaledVelocity = scaleChordVelocity(DEFAULT_CHORD_VELOCITY, inputVolume);
     for (const note of prevNotes.current) {
       audioEngine.updateNoteSourceVelocity(note, scaledVelocity, CHORD_PAD_SOURCE);
     }

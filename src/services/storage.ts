@@ -1,4 +1,4 @@
-import { normalizeChordSpec, type ChordSpec } from '../music/chords';
+import { DEFAULT_CHORD_VELOCITY, normalizeChordSpec, type ChordSpec } from '../music/chords';
 
 const STORAGE_KEY = 'resonator-state';
 const DEFAULT_MASTER_VOLUME = 1;
@@ -159,7 +159,7 @@ function normalizeChordSequenceEvent(value: unknown): ChordSequenceEvent | null 
       : 0,
     velocity: typeof event.velocity === 'number' && Number.isFinite(event.velocity)
       ? Math.min(127, Math.max(1, Math.round(event.velocity)))
-      : 100,
+      : DEFAULT_CHORD_VELOCITY,
   };
 }
 
