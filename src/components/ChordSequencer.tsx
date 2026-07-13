@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type InputHTMLAttributes } from 'react';
 import { audioEngine } from '../services/AudioEngine';
 import { midiService } from '../services/MidiService';
 import {
@@ -93,6 +93,62 @@ function getMaximumTieSteps(
 
 function clampInteger(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, Math.round(value)));
+}
+
+interface DraftIntegerInputProps extends Omit<
+  InputHTMLAttributes<HTMLInputElement>,
+  'type' | 'value' | 'min' | 'max' | 'step' | 'onChange' | 'onBlur' | 'onKeyDown'
+> {
+  value: number;
+  min: number;
+  max: number;
+  onCommit: (value: number) => void;
+}
+
+function DraftIntegerInput({ value, min, max, onCommit, ...inputProps }: DraftIntegerInputProps) {
+  const [draft, setDraft] = useState(() => String(value));
+  const skipNextBlurCommitRef = useRef(false);
+
+  const commit = () => {
+    if (skipNextBlurCommitRef.current) {
+      skipNextBlurCommitRef.current = false;
+      return;
+    }
+
+    const parsed = draft.trim() === '' ? Number.NaN : Number(draft);
+    if (!Number.isFinite(parsed)) {
+      setDraft(String(value));
+      return;
+    }
+
+    const next = clampInteger(parsed, min, max);
+    setDraft(String(next));
+    if (next !== value) onCommit(next);
+  };
+
+  return (
+    <input
+      {...inputProps}
+      type="number"
+      min={min}
+      max={max}
+      step="1"
+      value={draft}
+      onChange={event => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={event => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          event.currentTarget.blur();
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          skipNextBlurCommitRef.current = true;
+          setDraft(String(value));
+          event.currentTarget.blur();
+        }
+      }}
+    />
+  );
 }
 
 export function ChordSequencer({
@@ -523,16 +579,14 @@ export function ChordSequencer({
 
         <label className="grid gap-1 font-mono text-[9px] font-semibold uppercase text-muted">
           BPM
-          <input
-            type="number"
-            min="30"
-            max="300"
-            step="1"
+          <DraftIntegerInput
+            key={`bpm-${clockSource}-${clockSource === 'midi' && externalBpm ? Math.round(externalBpm) : Math.round(bpm)}`}
+            min={30}
+            max={300}
             value={clockSource === 'midi' && externalBpm ? Math.round(externalBpm) : Math.round(bpm)}
             disabled={clockSource === 'midi'}
             className="h-10 w-[72px] border border-ink bg-paper px-2 text-[11px] font-semibold text-copy disabled:bg-surface"
-            onChange={event => {
-              const next = clampInteger(Number(event.target.value), 30, 300);
+            onCommit={next => {
               bpmRef.current = next;
               setBpm(next);
             }}
@@ -541,14 +595,13 @@ export function ChordSequencer({
 
         <label className="grid gap-1 font-mono text-[9px] font-semibold uppercase text-muted">
           Length
-          <input
-            type="number"
-            min="1"
-            max="64"
-            step="1"
+          <DraftIntegerInput
+            key={`pattern-length-${patternLength}`}
+            min={1}
+            max={64}
             value={patternLength}
             className="h-10 w-[64px] border border-ink bg-paper px-2 text-[11px] font-semibold text-copy"
-            onChange={event => handleLengthChange(Number(event.target.value))}
+            onCommit={handleLengthChange}
           />
         </label>
 
@@ -680,17 +733,14 @@ export function ChordSequencer({
             <label className="grid grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-[9px] font-semibold uppercase text-muted">
               <span>Length</span>
               <span className="font-mono text-[10px] text-copy">{selectedEvent.tieSteps + 1} Steps</span>
-              <input
-                type="number"
-                min="1"
+              <DraftIntegerInput
+                key={`event-length-${selectedStep}-${selectedEvent.tieSteps + 1}`}
+                min={1}
                 max={maximumSelectedTie + 1}
-                step="1"
                 value={selectedEvent.tieSteps + 1}
                 aria-label="Event length in steps"
                 className="col-span-2 h-10 w-full border border-ink bg-paper px-2 font-mono text-[11px] font-semibold text-copy"
-                onChange={event => updateSelectedEvent({
-                  tieSteps: clampInteger(Number(event.target.value) - 1, 0, maximumSelectedTie),
-                })}
+                onCommit={nextLength => updateSelectedEvent({ tieSteps: nextLength - 1 })}
               />
             </label>
 

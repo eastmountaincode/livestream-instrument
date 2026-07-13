@@ -93,6 +93,7 @@ function StreamControls({
   soloId,
   onSolo,
   externalVolume,
+  onManualVolumeChange,
   sources,
   clock,
   onRemoveSource,
@@ -102,6 +103,7 @@ function StreamControls({
   soloId: string | null;
   onSolo: (id: string | null) => void;
   externalVolume?: number;
+  onManualVolumeChange: (id: string) => void;
   sources: LiveSource[];
   clock: Date;
   onRemoveSource: (sourceId: string) => void;
@@ -278,6 +280,10 @@ function StreamControls({
               className="col-span-2 w-full min-w-0"
               onChange={e => {
                 const val = parseFloat(e.target.value);
+                // A MIDI CC value temporarily drives this controlled input.
+                // Once the user moves the slider, hand display ownership back
+                // to the component's local state so the handle follows the drag.
+                onManualVolumeChange(id);
                 setVol(val);
                 audioEngine.setStreamVolume(id, val);
                 persist({ volume: val });
@@ -400,6 +406,16 @@ export function Controls({
     return unsubscribe;
   }, [streamIds]);
 
+  const clearMidiMappedVolume = useCallback((streamId: string) => {
+    setMidiMappedVolumes(prev => {
+      if (!(streamId in prev)) return prev;
+
+      const next = { ...prev };
+      delete next[streamId];
+      return next;
+    });
+  }, []);
+
   return (
     <div className="dev-mode dev-mode-slate flex flex-col gap-1.5">
       {streamIds.length === 0 && (
@@ -417,6 +433,7 @@ export function Controls({
               soloId={soloId}
               onSolo={onSoloChange}
               externalVolume={midiMappedVolumes[id]}
+              onManualVolumeChange={clearMidiMappedVolume}
               sources={sources}
               clock={clock}
               onRemoveSource={onRemoveSource}
