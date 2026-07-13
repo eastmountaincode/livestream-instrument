@@ -705,7 +705,7 @@ export function ChordSequencer({
             >
               <span className="text-[9px] font-semibold opacity-70">{index + 1}</span>
               <span className="truncate text-[10px] font-semibold">
-                {event ? (isOnset ? getChordLabel(event.chord) : 'Tie') : ''}
+                {event ? (isOnset ? getChordLabel(event.chord) : '...') : ''}
               </span>
             </button>
           );
