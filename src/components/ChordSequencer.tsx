@@ -679,8 +679,8 @@ export function ChordSequencer({
                 isSelected && 'sequencer-step-selected',
                 !insidePattern && 'border-ink/25 bg-surface text-muted opacity-35',
                 insidePattern && !event && 'border-ink bg-paper text-copy hover:bg-soft',
-                insidePattern && isOnset && 'border-ink bg-accent text-copy',
-                insidePattern && isContinuation && 'border-ink bg-accent text-copy',
+                insidePattern && isOnset && 'border-ink bg-ground text-copy',
+                insidePattern && isContinuation && 'border-ink bg-ground text-copy',
                 isCurrent && '!bg-warning !text-copy',
               )}
               disabled={!insidePattern}
