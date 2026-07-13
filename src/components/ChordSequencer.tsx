@@ -625,6 +625,13 @@ export function ChordSequencer({
           Follow
         </UiButton>
 
+        <span
+          className="flex h-7 items-center px-1 font-mono text-[10px] font-semibold text-copy"
+          aria-label={`Selected chord: ${currentChordLabel}`}
+        >
+          {currentChordLabel}
+        </span>
+
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <UiButton onClick={undo} disabled={!canUndo}>Undo</UiButton>
           <UiButton onClick={clearPattern}>Clear</UiButton>
@@ -694,7 +701,7 @@ export function ChordSequencer({
       </div>
 
       <div className="dev-mode dev-mode-indigo border-t border-ink pt-2">
-        <div className="relative">
+        <div>
           <div
             className={cx('grid grid-cols-3 gap-2', !selectedEvent && 'invisible')}
             aria-hidden={!selectedEvent}
@@ -744,12 +751,6 @@ export function ChordSequencer({
               />
             </label>
           </div>
-
-          {!selectedEvent && (
-            <p className="absolute inset-0 m-0 flex items-center text-[10px] font-semibold uppercase text-muted">
-              Choose a step to edit or assign {currentChordLabel}.
-            </p>
-          )}
         </div>
       </div>
 
