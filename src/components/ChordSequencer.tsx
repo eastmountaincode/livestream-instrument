@@ -556,25 +556,6 @@ export function ChordSequencer({
     stopPlayback(true);
   };
 
-  const duplicateSelected = () => {
-    if (selectedStep === null || !selectedEvent) return;
-    const target = selectedStep + selectedEvent.tieSteps + 1;
-    if (target >= patternLength) return;
-    commitSteps(placeEvent(stepsRef.current, target, selectedEvent));
-    selectedStepRef.current = target;
-    setSelectedStep(target);
-    setPage(Math.floor(target / STEP_GROUP_SIZE));
-  };
-
-  const removeSelected = () => {
-    if (selectedStep === null || !selectedEvent) return;
-    const next = cloneSteps(stepsRef.current);
-    next[selectedStep] = null;
-    commitSteps(next);
-    selectedStepRef.current = null;
-    setSelectedStep(null);
-  };
-
   const pageSteps = useMemo(
     () => Array.from({ length: STEP_GROUP_SIZE }, (_, offset) => page * STEP_GROUP_SIZE + offset),
     [page],
@@ -712,7 +693,7 @@ export function ChordSequencer({
         })}
       </div>
 
-      <div className="dev-mode dev-mode-indigo grid gap-2 border-t border-ink pt-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+      <div className="dev-mode dev-mode-indigo border-t border-ink pt-2">
         <div className="relative">
           <div
             className={cx('grid grid-cols-3 gap-2', !selectedEvent && 'invisible')}
@@ -766,22 +747,9 @@ export function ChordSequencer({
 
           {!selectedEvent && (
             <p className="absolute inset-0 m-0 flex items-center text-[10px] font-semibold uppercase text-muted">
-            Choose a step to edit or assign {currentChordLabel}.
+              Choose a step to edit or assign {currentChordLabel}.
             </p>
           )}
-        </div>
-
-        <div className="flex flex-wrap gap-1 lg:justify-end">
-          <UiButton
-            disabled={!selectedEvent}
-            onClick={() => updateSelectedEvent({ chord: normalizeChordSpec(selectedChord) })}
-          >
-            Use {currentChordLabel}
-          </UiButton>
-          <UiButton disabled={!selectedEvent || selectedStep === null || selectedStep + selectedEvent.tieSteps + 1 >= patternLength} onClick={duplicateSelected}>
-            Duplicate
-          </UiButton>
-          <UiButton disabled={!selectedEvent} onClick={removeSelected}>Remove</UiButton>
         </div>
       </div>
 
