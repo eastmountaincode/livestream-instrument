@@ -180,7 +180,7 @@ export function StreamSelector({
                   return (
                     <button
                       key={source.id}
-                      className={`grid h-11 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 overflow-hidden border px-2 py-1.5 text-left font-mono text-[10px] font-semibold uppercase ${getSourceButtonClass(wanted || active, status)}`}
+                      className={`grid h-11 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 overflow-hidden border px-2 py-1.5 text-left font-mono text-[10px] font-semibold uppercase sm:h-9 ${getSourceButtonClass(wanted || active, status)}`}
                       onClick={() => toggle(source)}
                       title={`${source.description}\n${source.location}${localTime ? `\nLocal time: ${localTime}` : ''}${status ? `\n${getStatusDetail(status)}` : ''}`}
                     >
