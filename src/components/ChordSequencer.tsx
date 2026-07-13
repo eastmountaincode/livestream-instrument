@@ -110,11 +110,21 @@ interface DraftIntegerInputProps extends Omit<
   min: number;
   max: number;
   onCommit: (value: number) => void;
+  onValidChange?: (value: number) => void;
 }
 
-function DraftIntegerInput({ value, min, max, onCommit, ...inputProps }: DraftIntegerInputProps) {
+function DraftIntegerInput({
+  value,
+  min,
+  max,
+  onCommit,
+  onValidChange,
+  onFocus,
+  ...inputProps
+}: DraftIntegerInputProps) {
   const [draft, setDraft] = useState(() => String(value));
   const skipNextBlurCommitRef = useRef(false);
+  const focusValueRef = useRef(value);
 
   const commit = () => {
     if (skipNextBlurCommitRef.current) {
@@ -141,7 +151,19 @@ function DraftIntegerInput({ value, min, max, onCommit, ...inputProps }: DraftIn
       max={max}
       step="1"
       value={draft}
-      onChange={event => setDraft(event.target.value)}
+      onFocus={event => {
+        focusValueRef.current = value;
+        onFocus?.(event);
+      }}
+      onChange={event => {
+        const nextDraft = event.target.value;
+        setDraft(nextDraft);
+
+        const parsed = nextDraft.trim() === '' ? Number.NaN : Number(nextDraft);
+        if (Number.isInteger(parsed) && parsed >= min && parsed <= max && parsed !== value) {
+          onValidChange?.(parsed);
+        }
+      }}
       onBlur={commit}
       onKeyDown={event => {
         if (event.key === 'Enter') {
@@ -150,7 +172,8 @@ function DraftIntegerInput({ value, min, max, onCommit, ...inputProps }: DraftIn
         } else if (event.key === 'Escape') {
           event.preventDefault();
           skipNextBlurCommitRef.current = true;
-          setDraft(String(value));
+          setDraft(String(focusValueRef.current));
+          if (focusValueRef.current !== value) onCommit(focusValueRef.current);
           event.currentTarget.blur();
         }
       }}
@@ -541,6 +564,11 @@ export function ChordSequencer({
     }
   };
 
+  const handleBpmChange = (next: number) => {
+    bpmRef.current = next;
+    setBpm(next);
+  };
+
   const undo = () => {
     const previous = historyRef.current.pop();
     if (!previous) return;
@@ -588,16 +616,16 @@ export function ChordSequencer({
         <label className="grid gap-1 font-mono text-[9px] font-semibold uppercase text-muted">
           BPM
           <DraftIntegerInput
-            key={`bpm-${clockSource}-${clockSource === 'midi' && externalBpm ? Math.round(externalBpm) : Math.round(bpm)}`}
+            key={clockSource === 'midi'
+              ? `bpm-midi-${externalBpm ? Math.round(externalBpm) : Math.round(bpm)}`
+              : 'bpm-internal'}
             min={30}
             max={300}
             value={clockSource === 'midi' && externalBpm ? Math.round(externalBpm) : Math.round(bpm)}
             disabled={clockSource === 'midi'}
             className="h-7 w-[64px] border border-ink bg-paper px-2 text-[10px] font-semibold text-copy disabled:bg-surface"
-            onCommit={next => {
-              bpmRef.current = next;
-              setBpm(next);
-            }}
+            onValidChange={handleBpmChange}
+            onCommit={handleBpmChange}
           />
         </label>
 
