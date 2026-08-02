@@ -1161,6 +1161,14 @@ export class AudioEngine {
     this.harmonicEvidenceResponse = Number.isFinite(settings.response)
       ? Math.min(1, Math.max(0, settings.response))
       : 0.5;
+
+    // Harmonic Evidence is now the fixed tone mode, so there is no selector
+    // calling setToneMode() to start analysis. Keep the analyzer alive here
+    // and apply slider changes to latched/held voices without a retrigger.
+    if (this.toneMode === 'harmonic-evidence') {
+      this.startToneAnalysis();
+      this.updateAnalyzedToneVoices();
+    }
   }
 
   getHarmonicEvidenceSettings() {
