@@ -6,8 +6,19 @@ const DEFAULT_KEYBOARD_VOLUME = 3.2;
 const DEFAULT_CHORD_PAD_VOLUME = 1.55;
 const DEFAULT_HIGH_PASS_FREQ = 20;
 const DEFAULT_LOW_PASS_FREQ = 20000;
+const DEFAULT_HARMONIC_EVIDENCE_SETTINGS: HarmonicEvidenceSettings = {
+  amount: 1,
+  color: 0,
+  response: 0.5,
+};
 
 export type ToneMode = 'bands' | 'spectral-snap' | 'harmonic-evidence';
+
+export interface HarmonicEvidenceSettings {
+  amount: number;
+  color: number;
+  response: number;
+}
 
 export interface StreamSettings {
   filterQ: number;
@@ -54,12 +65,14 @@ interface SavedState {
   chordBank: ChordSpec[];
   chordSequencer: ChordSequencerState;
   toneMode: ToneMode;
+  harmonicEvidenceSettings: HarmonicEvidenceSettings;
 }
 
-type StoredStateInput = Partial<Omit<SavedState, 'toneMode' | 'chordBank'>> & {
+type StoredStateInput = Partial<Omit<SavedState, 'toneMode' | 'chordBank' | 'harmonicEvidenceSettings'>> & {
   toneMode?: unknown;
   pitchSourceMode?: unknown;
   chordBank?: unknown;
+  harmonicEvidenceSettings?: unknown;
 };
 
 function load(): StoredStateInput | null {
@@ -117,6 +130,25 @@ function normalizeSavedState(state: StoredStateInput | null): SavedState {
     chordBank: normalizeChordBank(state?.chordBank),
     chordSequencer: normalizeChordSequencerState(state?.chordSequencer),
     toneMode: normalizeToneMode(state?.toneMode ?? state?.pitchSourceMode),
+    harmonicEvidenceSettings: normalizeHarmonicEvidenceSettings(state?.harmonicEvidenceSettings),
+  };
+}
+
+function normalizeHarmonicEvidenceSettings(value: unknown): HarmonicEvidenceSettings {
+  const settings = value && typeof value === 'object'
+    ? value as Partial<HarmonicEvidenceSettings>
+    : {};
+
+  return {
+    amount: typeof settings.amount === 'number' && Number.isFinite(settings.amount)
+      ? Math.min(2, Math.max(0, settings.amount))
+      : DEFAULT_HARMONIC_EVIDENCE_SETTINGS.amount,
+    color: typeof settings.color === 'number' && Number.isFinite(settings.color)
+      ? Math.min(1, Math.max(-1, settings.color))
+      : DEFAULT_HARMONIC_EVIDENCE_SETTINGS.color,
+    response: typeof settings.response === 'number' && Number.isFinite(settings.response)
+      ? Math.min(1, Math.max(0, settings.response))
+      : DEFAULT_HARMONIC_EVIDENCE_SETTINGS.response,
   };
 }
 
@@ -312,6 +344,16 @@ export function saveToneMode(toneMode: ToneMode): void {
 
 export function getToneMode(): ToneMode {
   return getCurrent().toneMode;
+}
+
+export function saveHarmonicEvidenceSettings(settings: HarmonicEvidenceSettings): void {
+  const state = getCurrent();
+  state.harmonicEvidenceSettings = normalizeHarmonicEvidenceSettings(settings);
+  save(state);
+}
+
+export function getHarmonicEvidenceSettings(): HarmonicEvidenceSettings {
+  return getCurrent().harmonicEvidenceSettings;
 }
 
 export function removeStreamSettings(id: string): void {

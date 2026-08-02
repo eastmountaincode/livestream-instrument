@@ -26,7 +26,7 @@ export function SourceBackdrop({ activeIds, sources }: Props) {
           }}
         />
       ))}
-      <div className="absolute inset-0 bg-[rgba(242,240,232,0.86)]" />
+      <div className="absolute inset-0 bg-white/85" />
     </div>
   );
 }

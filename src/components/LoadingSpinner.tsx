@@ -13,7 +13,7 @@ export function LoadingSpinner({
     <span role="status" className={`inline-flex -translate-y-px shrink-0 items-center justify-center ${className}`}>
       <span
         aria-hidden="true"
-        className="block animate-spin rounded-full border border-current border-r-transparent motion-reduce:animate-none motion-reduce:opacity-60"
+        className="block animate-spin rounded-full border border-current border-r-transparent motion-reduce:animate-none"
         style={{ width: size, height: size }}
       />
       <span className="sr-only">{label}</span>

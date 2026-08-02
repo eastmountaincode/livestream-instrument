@@ -329,7 +329,7 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
         </button>
         <div className="flex items-center gap-1 text-[11px] font-black uppercase text-black">
           <button
-            className="icon-button flex h-7 w-7 items-center justify-center border-2 border-black p-0 disabled:opacity-60"
+            className="icon-button flex h-7 w-7 items-center justify-center border-2 border-black p-0"
             onClick={() => nudgeBaseOctave(-1)}
             disabled={baseOctave <= MIN_BASE_OCTAVE}
             aria-label="Lower key range"
@@ -339,7 +339,7 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
           </button>
           <span>{rangeLabel}</span>
           <button
-            className="icon-button flex h-7 w-7 items-center justify-center border-2 border-black p-0 disabled:opacity-60"
+            className="icon-button flex h-7 w-7 items-center justify-center border-2 border-black p-0"
             onClick={() => nudgeBaseOctave(1)}
             disabled={baseOctave >= MAX_BASE_OCTAVE}
             aria-label="Raise key range"
@@ -356,7 +356,7 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
             Release All
           </button>
         )}
-        {!streamConnected && <span className="ml-auto border-2 border-black px-2 py-1 text-[10px] font-black uppercase text-black/55">Select a live source to play</span>}
+        {!streamConnected && <span className="ml-auto border-2 border-black bg-black px-2 py-1 text-[10px] font-black uppercase text-white">Select a live source to play</span>}
       </div>
       <div
         className={`relative flex touch-none select-none ${compactVisualRange ? 'h-[104px]' : 'h-[168px]'} overflow-hidden border-2 border-black bg-white`}
@@ -379,8 +379,8 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
                   : 'bg-white text-black hover:bg-soft'
               }`}
             >
-              <span className={`text-[9px] font-black ${active ? 'text-white' : 'text-black/55'}`}>{keyLabel(k.note)}</span>
-              <span className={`text-[8px] font-bold ${active ? 'text-white/70' : 'text-black/40'}`}>{k.name}</span>
+              <span className={`text-[9px] font-black ${active ? 'text-white' : 'text-black'}`}>{keyLabel(k.note)}</span>
+              <span className={`text-[8px] font-bold ${active ? 'text-white' : 'text-black'}`}>{k.name}</span>
             </div>
           );
         })}
@@ -399,7 +399,7 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
               }`}
               style={{ left: `${leftPercent}%`, width: `${blackKeyWidthPercent}%` }}
             >
-              <span className={`text-[9px] font-black ${active ? 'text-black' : 'text-white/65'}`}>{keyLabel(k.note)}</span>
+              <span className={`text-[9px] font-black ${active ? 'text-black' : 'text-white'}`}>{keyLabel(k.note)}</span>
             </div>
           );
         })}

@@ -1,20 +1,22 @@
 @import "tailwindcss";
 
 @theme {
-  --color-ink: #242424;
-  --color-ink-hover: #2a2a2a;
-  --color-copy: #171717;
-  --color-paper: #fbfaf6;
-  --color-ground: #ebe8de;
-  --color-surface: #eeece3;
-  --color-panel: #f3f1ea;
-  --color-soft: #f2f0e8;
-  --color-highlight: #f7f1cf;
-  --color-muted: #68645c;
-  --color-muted-strong: #66635d;
-  --color-accent: #d8cfb7;
-  --color-warning: #f3d85a;
-  --color-error: #d6a19a;
+  --color-black: #1646a0;
+  --color-white: #ffffff;
+  --color-ink: #1646a0;
+  --color-ink-hover: #1646a0;
+  --color-copy: #1646a0;
+  --color-paper: #ffffff;
+  --color-ground: #cbd8eb;
+  --color-surface: #cbd8eb;
+  --color-panel: #ffffff;
+  --color-soft: #cbd8eb;
+  --color-highlight: #cbd8eb;
+  --color-muted: #1646a0;
+  --color-muted-strong: #1646a0;
+  --color-accent: #cbd8eb;
+  --color-warning: #cbd8eb;
+  --color-error: #cbd8eb;
 }
 
 @font-face {
@@ -153,6 +155,14 @@ input[type="range"]::-moz-range-track {
   background-color: var(--ui-ink);
 }
 
+.instrument-ui .text-black {
+  color: var(--ui-ink);
+}
+
+.instrument-ui .text-white {
+  color: var(--ui-paper);
+}
+
 .instrument-ui .hover\:bg-black:hover {
   background-color: var(--ui-ink);
 }
@@ -173,8 +183,8 @@ input[type="range"]::-moz-range-track {
 }
 
 .instrument-ui .icon-button:disabled {
-  background-color: var(--ui-surface);
-  color: var(--ui-muted);
+  background-color: var(--ui-accent);
+  color: var(--ui-ink);
 }
 
 .instrument-ui .font-black {
@@ -250,7 +260,7 @@ input[type="range"]::-moz-range-track {
 .instrument-ui select:focus-visible,
 .instrument-ui input:focus-visible,
 .instrument-ui textarea:focus-visible {
-  outline: 2px solid var(--color-warning);
+  outline: 2px solid var(--color-ink);
   outline-offset: 2px;
 }
 

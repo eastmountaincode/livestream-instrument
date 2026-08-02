@@ -14,7 +14,7 @@ interface ApiResponse {
 }
 
 const STATUS_OPTIONS: StreamReviewStatus[] = ['unreviewed', 'accepted', 'rejected'];
-const fieldClass = 'h-9 w-full border-2 border-black bg-white px-3 text-black outline-none focus:bg-warning disabled:bg-soft disabled:text-black/60';
+const fieldClass = 'h-9 w-full border-2 border-black bg-white px-3 text-black outline-none focus:bg-warning disabled:bg-soft disabled:text-black';
 
 function titleCaseValue(value: string) {
   return value
@@ -152,7 +152,7 @@ function AuditionCell({ candidate }: { candidate: StreamCandidate }) {
       <div className="flex gap-1">
         <button
           type="button"
-          className="h-8 flex-1 border-2 border-black bg-white px-2 text-xs font-black uppercase text-black hover:bg-black hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+          className="h-8 flex-1 border-2 border-black bg-white px-2 text-xs font-black uppercase text-black hover:bg-black hover:text-white disabled:cursor-not-allowed disabled:bg-soft"
           disabled={!hasStream || isLoading}
           onClick={isPlaying ? stop : play}
         >
@@ -362,7 +362,7 @@ export function StreamCandidateTable() {
 
         <div className="overflow-x-auto border-2 border-black bg-white">
           <table className="w-full min-w-[2370px] border-collapse text-left text-xs">
-            <thead className="sticky top-0 z-10 bg-soft text-[10px] font-black uppercase text-black/60">
+            <thead className="sticky top-0 z-10 bg-soft text-[10px] font-black uppercase text-black">
               <tr>
                 <th className="w-[170px] border-b-2 border-r border-black px-2 py-2">Audition</th>
                 <th className="w-[210px] border-b-2 border-r border-black px-2 py-2">Status</th>

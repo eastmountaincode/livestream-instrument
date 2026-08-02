@@ -19,25 +19,32 @@ export function TrackWaveform({ id, muted }: TrackWaveformProps) {
     if (!ctx) return;
 
     const data = new Uint8Array(analyser.fftSize);
+    const styles = getComputedStyle(canvas);
+    const paperColor = styles.getPropertyValue('--color-paper').trim() || '#fff';
+    const inkColor = styles.getPropertyValue('--color-ink').trim() || '#1646a0';
+    const surfaceColor = styles.getPropertyValue('--color-surface').trim() || '#cbd8eb';
 
     const draw = () => {
       rafRef.current = requestAnimationFrame(draw);
       analyser.getByteTimeDomainData(data);
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#fff';
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = muted ? surfaceColor : paperColor;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       const centerY = Math.round(canvas.height / 2) + 0.5;
 
-      ctx.strokeStyle = muted ? 'rgba(0,0,0,0.16)' : 'rgba(0,0,0,0.26)';
+      ctx.strokeStyle = inkColor;
+      ctx.globalAlpha = 1;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(0, centerY);
       ctx.lineTo(canvas.width, centerY);
       ctx.stroke();
 
-      ctx.strokeStyle = muted ? 'rgba(0,0,0,0.34)' : '#111';
+      ctx.strokeStyle = inkColor;
+      ctx.globalAlpha = 1;
       ctx.lineWidth = 1;
       ctx.beginPath();
 
@@ -52,6 +59,7 @@ export function TrackWaveform({ id, muted }: TrackWaveformProps) {
       }
 
       ctx.stroke();
+      ctx.globalAlpha = 1;
     };
 
     draw();
@@ -61,7 +69,7 @@ export function TrackWaveform({ id, muted }: TrackWaveformProps) {
   return (
     <canvas
       ref={canvasRef}
-      className={`h-[53px] w-[92px] min-w-[92px] border-2 ${muted ? 'border-black/40 opacity-50' : 'border-black'}`}
+      className="h-[53px] w-[92px] min-w-[92px] border border-ink"
       width={92}
       height={53}
     />

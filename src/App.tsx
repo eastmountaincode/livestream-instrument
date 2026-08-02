@@ -230,7 +230,7 @@ function App() {
         <button
           onClick={handleStart}
           disabled={loading}
-          className="border border-ink bg-paper px-8 py-3 text-sm font-semibold uppercase text-copy hover:bg-ink hover:text-paper disabled:cursor-wait disabled:opacity-50"
+          className="border border-ink bg-paper px-8 py-3 text-sm font-semibold uppercase text-copy hover:bg-ink hover:text-paper disabled:cursor-wait disabled:bg-surface"
         >
           {loading ? 'Connecting...' : hasSavedStreams ? 'Resume Session' : 'Start'}
         </button>
@@ -250,7 +250,7 @@ function App() {
     >
       <SourceBackdrop activeIds={activeIds} sources={availableSources} />
 
-      <div className="sticky top-0 z-30 border-b border-ink bg-ground/95 backdrop-blur">
+      <div className="sticky top-0 z-30 border-b border-ink bg-ground">
         <header className="mx-auto grid max-w-[1120px] grid-cols-[auto_minmax(0,1fr)] items-end gap-2 px-4 py-2 md:grid-cols-[auto_minmax(280px,1fr)] md:py-3">
           <h1 className="brand-title text-2xl leading-none text-copy md:text-5xl">Cicada</h1>
           <Visualizer />

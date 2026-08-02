@@ -49,7 +49,7 @@ export function SettingsPanel() {
         <span className="text-[10px] font-semibold uppercase text-copy">MPK keys</span>
         <UiButton
           aria-pressed={midiKeyboardEnabled}
-          className={midiKeyboardEnabled ? 'bg-ink text-paper' : undefined}
+          className={midiKeyboardEnabled ? '!bg-ink !text-paper' : undefined}
           onClick={toggleMidiKeyboard}
         >
           {midiKeyboardEnabled ? 'On' : 'Off'}

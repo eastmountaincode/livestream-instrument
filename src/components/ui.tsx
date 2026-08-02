@@ -58,7 +58,7 @@ export function UiButton({ className, type, ...props }: ButtonHTMLAttributes<HTM
     <button
       type={type ?? 'button'}
       className={cx(
-        'h-7 border border-ink bg-paper px-2 font-mono text-[10px] font-semibold uppercase text-copy hover:bg-ink hover:text-paper disabled:opacity-30',
+        'h-7 border border-ink bg-paper px-2 font-mono text-[10px] font-semibold uppercase text-copy hover:bg-ink hover:text-paper disabled:bg-surface disabled:text-copy',
         className,
       )}
       {...props}

@@ -14,12 +14,15 @@ export function Visualizer() {
     const analyser = audioEngine.analyser;
     const bufferLength = analyser.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
+    const styles = getComputedStyle(canvas);
+    const paperColor = styles.getPropertyValue('--color-paper').trim() || '#fff';
+    const inkColor = styles.getPropertyValue('--color-ink').trim() || '#1646a0';
 
     const draw = () => {
       rafRef.current = requestAnimationFrame(draw);
       analyser.getByteFrequencyData(dataArray);
 
-      ctx.fillStyle = '#fff';
+      ctx.fillStyle = paperColor;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       const barWidth = (canvas.width / bufferLength) * 2.5;
@@ -27,8 +30,7 @@ export function Visualizer() {
 
       for (let i = 0; i < bufferLength; i++) {
         const barHeight = (dataArray[i] / 255) * canvas.height;
-        const lightness = 12 + (dataArray[i] / 255) * 24;
-        ctx.fillStyle = `hsl(0, 0%, ${lightness}%)`;
+        ctx.fillStyle = inkColor;
         ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
         x += barWidth + 1;
       }

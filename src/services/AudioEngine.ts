@@ -51,7 +51,13 @@ const HARMONIC_EVIDENCE_PROMINENCE_FLOOR_DB = 1.5;
 const HARMONIC_EVIDENCE_FULL_SCALE_DB = 12;
 const HARMONIC_EVIDENCE_OUTPUT_SCALE = 0.65;
 const HARMONIC_EVIDENCE_MIN_GAIN = 0.4;
-const HARMONIC_EVIDENCE_SMOOTHING = 0.28;
+const HARMONIC_EVIDENCE_COLOR_TILT = 0.85;
+
+interface HarmonicEvidenceResponseValues {
+  smoothing: number;
+  bandTimeConstant: number;
+  gainTimeConstant: number;
+}
 
 export type ToneMode = 'bands' | 'spectral-snap' | 'harmonic-evidence';
 
@@ -135,7 +141,10 @@ export class AudioEngine {
   private activeNotes: Map<number, ActiveNoteState> = new Map();
   private externalClock = false;
   private pitchBendSemitones = 0;
-  private toneMode: ToneMode = 'bands';
+  private toneMode: ToneMode = 'harmonic-evidence';
+  private harmonicEvidenceAmount = 1;
+  private harmonicEvidenceColor = 0;
+  private harmonicEvidenceResponse = 0.5;
   private analysisTimer: number | null = null;
   private keepAliveOscillator: OscillatorNode | null = null;
   private keepAliveGain: GainNode | null = null;
@@ -415,7 +424,12 @@ export class AudioEngine {
 
     const evidenceGain = HARMONIC_EVIDENCE_MIN_GAIN
       + (1 - HARMONIC_EVIDENCE_MIN_GAIN) * Math.sqrt(Math.max(0, Math.min(1, voice.harmonicEvidence)));
-    return baseGain * HARMONIC_EVIDENCE_OUTPUT_SCALE * evidenceGain;
+    const currentEffectGain = HARMONIC_EVIDENCE_OUTPUT_SCALE * evidenceGain;
+    const amountGain = Math.max(
+      0,
+      1 + (currentEffectGain - 1) * this.harmonicEvidenceAmount,
+    );
+    return baseGain * amountGain;
   }
 
   private getEffectiveVelocity(note: number): number {
@@ -718,8 +732,15 @@ export class AudioEngine {
       const frequency = voice.targetFrequency * band.harmonic;
       const active = enabled && frequency <= maxFrequency;
       const strength = strengths?.get(band.harmonic) ?? 0;
+      const colorGain = Math.pow(
+        Math.max(1, band.harmonic / 2),
+        this.harmonicEvidenceColor * HARMONIC_EVIDENCE_COLOR_TILT,
+      );
       const bandGain = active
-        ? (0.9 / band.harmonic) * (0.25 + strength * 0.75)
+        ? this.harmonicEvidenceAmount
+          * (0.9 / band.harmonic)
+          * colorGain
+          * (0.25 + strength * 0.75)
         : 0;
 
       if (active) {
@@ -747,20 +768,39 @@ export class AudioEngine {
     if (!this.refreshAnalysisBins(ch)) return;
 
     const now = this.ctx.currentTime;
+    const response = this.getHarmonicEvidenceResponseValues();
     for (const [note, voice] of ch.activeVoices) {
       const measurement = this.measureHarmonicEvidence(ch, voice.targetFrequency);
       voice.harmonicEvidence += (
         measurement.score - voice.harmonicEvidence
-      ) * HARMONIC_EVIDENCE_SMOOTHING;
-      this.configureHarmonicBands(voice, true, measurement.strengths, 0.06);
+      ) * response.smoothing;
+      this.configureHarmonicBands(
+        voice,
+        true,
+        measurement.strengths,
+        response.bandTimeConstant,
+      );
 
       voice.gain.gain.cancelScheduledValues(now);
       voice.gain.gain.setTargetAtTime(
         this.getVoiceOutputGain(voice, this.getEffectiveVelocity(note)),
         now,
-        0.08,
+        response.gainTimeConstant,
       );
     }
+  }
+
+  private getHarmonicEvidenceResponseValues(): HarmonicEvidenceResponseValues {
+    const response = this.harmonicEvidenceResponse;
+    const interpolate = (slow: number, neutral: number, fast: number) => response <= 0.5
+      ? slow + (neutral - slow) * response * 2
+      : neutral + (fast - neutral) * (response - 0.5) * 2;
+
+    return {
+      smoothing: interpolate(0.06, 0.28, 0.75),
+      bandTimeConstant: interpolate(0.24, 0.06, 0.015),
+      gainTimeConstant: interpolate(0.3, 0.08, 0.02),
+    };
   }
 
   private updateAnalyzedToneVoices() {
@@ -1109,6 +1149,26 @@ export class AudioEngine {
 
   getToneMode(): ToneMode {
     return this.toneMode;
+  }
+
+  setHarmonicEvidenceSettings(settings: { amount: number; color: number; response: number }) {
+    this.harmonicEvidenceAmount = Number.isFinite(settings.amount)
+      ? Math.min(2, Math.max(0, settings.amount))
+      : 1;
+    this.harmonicEvidenceColor = Number.isFinite(settings.color)
+      ? Math.min(1, Math.max(-1, settings.color))
+      : 0;
+    this.harmonicEvidenceResponse = Number.isFinite(settings.response)
+      ? Math.min(1, Math.max(0, settings.response))
+      : 0.5;
+  }
+
+  getHarmonicEvidenceSettings() {
+    return {
+      amount: this.harmonicEvidenceAmount,
+      color: this.harmonicEvidenceColor,
+      response: this.harmonicEvidenceResponse,
+    };
   }
 
   // --- Global controls (kept for backwards compat) ---

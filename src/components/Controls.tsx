@@ -8,12 +8,12 @@ import {
   saveStreamSettings,
   getStreamSettings,
   getMasterVolume,
-  getToneMode,
+  getHarmonicEvidenceSettings,
   saveMasterVolume,
   saveKeyboardVolume,
   saveChordPadVolume,
-  saveToneMode,
-  type ToneMode,
+  saveHarmonicEvidenceSettings,
+  type HarmonicEvidenceSettings,
 } from '../services/storage';
 import { formatCategory, formatLocalTime } from '../utils/format';
 
@@ -33,19 +33,6 @@ const MAX_STREAM_VOLUME = 16;
 const MAX_MIDI_STREAM_VOLUME = MAX_STREAM_VOLUME;
 const MIN_EQ_FREQ = 20;
 const MAX_EQ_FREQ = 20000;
-const TONE_MODES: ReadonlyArray<{ value: ToneMode; label: string; title: string }> = [
-  { value: 'bands', label: 'Bands', title: 'Use played note frequencies directly' },
-  {
-    value: 'spectral-snap',
-    label: 'Spectral Snap',
-    title: 'Continuously snap each note toward a distinct, stable spectral peak',
-  },
-  {
-    value: 'harmonic-evidence',
-    label: 'Harmonic Evidence',
-    title: 'Keep notes in tune and surface stream energy across their harmonic series',
-  },
-];
 
 const TRACK_KNOB_CC_GROUPS = [
   [20, 70],
@@ -149,14 +136,14 @@ function StreamControls({
   const displayedVolume = externalVolume ?? vol;
 
   return (
-    <div className={`dev-mode dev-mode-coral grid gap-3 bg-soft px-2 py-2.5 ${muted ? '[&_.sc-name]:opacity-40 [&_.sc-label]:opacity-40 [&_.sc-value]:opacity-40' : ''}`}>
+    <div className="dev-mode dev-mode-coral grid gap-3 bg-soft px-2 py-2.5">
       <div className="dev-mode dev-mode-orange flex min-w-0 flex-wrap items-start gap-2">
         <div className="dev-mode dev-mode-yellow flex min-w-[140px] flex-1 flex-wrap items-center gap-x-2 gap-y-1">
           <span className="sc-name min-w-0 basis-full whitespace-normal break-words text-[12px] font-black uppercase leading-snug text-black sm:basis-auto">
             {source?.name ?? id}
           </span>
           {source?.location && (
-            <span className="shrink-0 text-[10px] font-bold uppercase text-black/50">{source.location}</span>
+            <span className="shrink-0 text-[10px] font-bold uppercase text-black">{source.location}</span>
           )}
           {localTime && (
             <span className="sc-value shrink-0 border border-black bg-soft px-1.5 py-0.5 text-[10px] font-black text-black">
@@ -359,7 +346,9 @@ export function Controls({
   onRemoveSource,
 }: Props) {
   const [masterVolume, setMasterVolume] = useState(() => getMasterVolume());
-  const [toneMode, setToneMode] = useState<ToneMode>(() => getToneMode());
+  const [harmonicEvidenceSettings, setHarmonicEvidenceSettings] = useState(
+    () => getHarmonicEvidenceSettings(),
+  );
   const [midiMappedVolumes, setMidiMappedVolumes] = useState<Record<string, number>>({});
   const [clock, setClock] = useState(() => new Date());
   const streamIds = useMemo(() => Array.from(activeSourceIds), [activeSourceIds]);
@@ -369,8 +358,9 @@ export function Controls({
   }, [masterVolume]);
 
   useEffect(() => {
-    audioEngine.setToneMode(toneMode);
-  }, [toneMode]);
+    audioEngine.setHarmonicEvidenceSettings(harmonicEvidenceSettings);
+    saveHarmonicEvidenceSettings(harmonicEvidenceSettings);
+  }, [harmonicEvidenceSettings]);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => {
@@ -413,11 +403,15 @@ export function Controls({
     });
   }, []);
 
+  const updateHarmonicEvidenceSettings = useCallback((updates: Partial<HarmonicEvidenceSettings>) => {
+    setHarmonicEvidenceSettings(current => ({ ...current, ...updates }));
+  }, []);
+
   return (
     <div className="dev-mode dev-mode-slate flex flex-col gap-1.5">
       {streamIds.length === 0 && (
         <div className="flex items-center gap-2 py-1">
-          <span className="border-2 border-black px-2 py-1 text-[11px] font-black uppercase text-black/55">No Sources Active</span>
+          <span className="border-2 border-black bg-black px-2 py-1 text-[11px] font-black uppercase text-white">No Sources Active</span>
         </div>
       )}
       {streamIds.length > 0 && (
@@ -437,83 +431,130 @@ export function Controls({
           ))}
         </div>
       )}
-      <div className="dev-mode dev-mode-cyan flex flex-wrap items-start justify-between gap-4 pt-3">
-        <div className="dev-mode dev-mode-indigo grid w-full max-w-[240px] gap-2">
-          <label className="dev-mode dev-mode-violet grid w-full grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-black">
-            <span className="text-[11px] font-black uppercase">Master</span>
-            <span className="text-right font-mono text-[11px] font-black text-black">{Math.round(masterVolume * 100)}%</span>
-            <input
-              type="range"
-              min="0"
-              max="4"
-              step="0.01"
-              value={masterVolume}
-              className="col-span-2 w-full min-w-0"
-              onChange={e => {
-                const val = parseFloat(e.target.value);
-                setMasterVolume(val);
-                saveMasterVolume(val);
-              }}
-            />
-          </label>
-          <label className="dev-mode dev-mode-green grid w-full grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-black">
-            <span className="text-[11px] font-black uppercase">Keys</span>
-            <span className="text-right font-mono text-[11px] font-black text-black">{Math.round(keyboardVolume * 100)}%</span>
-            <input
-              type="range"
-              min="0"
-              max="4"
-              step="0.01"
-              value={keyboardVolume}
-              className="col-span-2 w-full min-w-0"
-              onChange={e => {
-                const val = parseFloat(e.target.value);
-                onKeyboardVolumeChange(val);
-                saveKeyboardVolume(val);
-              }}
-            />
-          </label>
-          <label className="dev-mode dev-mode-blue grid w-full grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-black">
-            <span className="text-[11px] font-black uppercase">Chord</span>
-            <span className="text-right font-mono text-[11px] font-black text-black">{Math.round(chordPadVolume * 100)}%</span>
-            <input
-              type="range"
-              min="0"
-              max="4"
-              step="0.01"
-              value={chordPadVolume}
-              className="col-span-2 w-full min-w-0"
-              onChange={e => {
-                const val = parseFloat(e.target.value);
-                onChordPadVolumeChange(val);
-                saveChordPadVolume(val);
-              }}
-            />
-          </label>
-        </div>
-        <div className="dev-mode dev-mode-pink flex flex-wrap items-center gap-3">
-          <div className="flex min-w-0 items-center gap-3 text-black">
-            <span className="text-[11px] font-black uppercase">Tone</span>
-            <div className="flex border-2 border-black">
-              {TONE_MODES.map(mode => (
-                <button
-                  key={mode.value}
-                  type="button"
-                  className={`px-2.5 py-1 font-mono text-[10px] font-black uppercase ${
-                    toneMode === mode.value
-                      ? 'bg-black text-white'
-                      : 'bg-white text-black hover:bg-black hover:text-white'
-                  }`}
-                  onClick={() => {
-                    setToneMode(mode.value);
-                    saveToneMode(mode.value);
-                  }}
-                  title={mode.title}
-                >
-                  {mode.label}
-                </button>
-              ))}
-            </div>
+      <div className="dev-mode dev-mode-cyan grid gap-3 pt-3">
+        <div className="grid gap-x-6 gap-y-2 sm:grid-cols-[minmax(0,240px)_minmax(0,240px)] sm:justify-between">
+          <div className="dev-mode dev-mode-indigo grid w-full max-w-[240px] gap-2">
+            <label className="dev-mode dev-mode-violet grid w-full grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-black">
+              <span className="text-[11px] font-black uppercase">Master</span>
+              <span className="text-right font-mono text-[11px] font-black text-black">{Math.round(masterVolume * 100)}%</span>
+              <input
+                type="range"
+                min="0"
+                max="4"
+                step="0.01"
+                value={masterVolume}
+                className="col-span-2 w-full min-w-0"
+                onChange={e => {
+                  const val = parseFloat(e.target.value);
+                  setMasterVolume(val);
+                  saveMasterVolume(val);
+                }}
+              />
+            </label>
+            <label className="dev-mode dev-mode-green grid w-full grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-black">
+              <span className="text-[11px] font-black uppercase">Keys</span>
+              <span className="text-right font-mono text-[11px] font-black text-black">{Math.round(keyboardVolume * 100)}%</span>
+              <input
+                type="range"
+                min="0"
+                max="4"
+                step="0.01"
+                value={keyboardVolume}
+                className="col-span-2 w-full min-w-0"
+                onChange={e => {
+                  const val = parseFloat(e.target.value);
+                  onKeyboardVolumeChange(val);
+                  saveKeyboardVolume(val);
+                }}
+              />
+            </label>
+            <label className="dev-mode dev-mode-blue grid w-full grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-black">
+              <span className="text-[11px] font-black uppercase">Chord</span>
+              <span className="text-right font-mono text-[11px] font-black text-black">{Math.round(chordPadVolume * 100)}%</span>
+              <input
+                type="range"
+                min="0"
+                max="4"
+                step="0.01"
+                value={chordPadVolume}
+                className="col-span-2 w-full min-w-0"
+                onChange={e => {
+                  const val = parseFloat(e.target.value);
+                  onChordPadVolumeChange(val);
+                  saveChordPadVolume(val);
+                }}
+              />
+            </label>
+          </div>
+          <div className="grid w-full max-w-[240px] gap-2">
+              <label
+                className="dev-mode dev-mode-violet grid w-full grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-black"
+                title="How strongly Harmonic Evidence shapes the played notes"
+              >
+                <span className="text-[11px] font-black uppercase">Evidence</span>
+                <span className="text-right font-mono text-[11px] font-black text-black">
+                  {Math.round(harmonicEvidenceSettings.amount * 100)}%
+                </span>
+                <input
+                  type="range"
+                  min="0"
+                  max="200"
+                  step="1"
+                  value={harmonicEvidenceSettings.amount * 100}
+                  className="col-span-2 w-full min-w-0"
+                  onChange={e => updateHarmonicEvidenceSettings({
+                    amount: parseFloat(e.target.value) / 100,
+                  })}
+                />
+              </label>
+              <label
+                className="dev-mode dev-mode-green grid w-full grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-black"
+                title="Tilt the surfaced harmonic bands from darker to brighter"
+              >
+                <span className="text-[11px] font-black uppercase">Color</span>
+                <span className="text-right font-mono text-[11px] font-black text-black">
+                  {harmonicEvidenceSettings.color === 0
+                    ? 'Neutral'
+                    : harmonicEvidenceSettings.color < 0
+                      ? `${Math.round(Math.abs(harmonicEvidenceSettings.color) * 100)}% Dark`
+                      : `${Math.round(harmonicEvidenceSettings.color * 100)}% Bright`}
+                </span>
+                <input
+                  type="range"
+                  min="-100"
+                  max="100"
+                  step="1"
+                  value={harmonicEvidenceSettings.color * 100}
+                  className="col-span-2 w-full min-w-0"
+                  onChange={e => updateHarmonicEvidenceSettings({
+                    color: parseFloat(e.target.value) / 100,
+                  })}
+                />
+              </label>
+              <label
+                className="dev-mode dev-mode-blue grid w-full grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-black"
+                title="Move from smoothly averaged evidence to faster reactions"
+              >
+                <span className="text-[11px] font-black uppercase">Response</span>
+                <span className="text-right font-mono text-[11px] font-black text-black">
+                  {harmonicEvidenceSettings.response === 0.5
+                    ? 'Balanced'
+                    : harmonicEvidenceSettings.response < 0.5
+                      ? `${Math.round((0.5 - harmonicEvidenceSettings.response) * 200)}% Smooth`
+                      : `${Math.round((harmonicEvidenceSettings.response - 0.5) * 200)}% Fast`}
+                </span>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={harmonicEvidenceSettings.response * 100}
+                  className="col-span-2 w-full min-w-0"
+                  onChange={e => updateHarmonicEvidenceSettings({
+                    response: parseFloat(e.target.value) / 100,
+                  })}
+                />
+              </label>
           </div>
         </div>
       </div>

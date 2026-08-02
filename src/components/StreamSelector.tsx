@@ -187,7 +187,7 @@ export function StreamSelector({
                       <span className="min-w-0 truncate leading-none">{source.name}</span>
                       <span className="flex h-full shrink-0 items-center gap-1 overflow-hidden">
                         {statusLabel && (
-                          <span className={looksLive ? 'inline-flex h-5 items-center whitespace-nowrap border border-paper px-1.5 text-[9px] leading-none text-paper' : 'inline-flex h-5 items-center whitespace-nowrap border border-ink bg-paper/60 px-1.5 text-[9px] leading-none text-copy'}>
+                          <span className={looksLive ? 'inline-flex h-5 items-center whitespace-nowrap border border-paper px-1.5 text-[9px] leading-none text-paper' : 'inline-flex h-5 items-center whitespace-nowrap border border-ink bg-paper px-1.5 text-[9px] leading-none text-copy'}>
                             {statusLabel}
                           </span>
                         )}

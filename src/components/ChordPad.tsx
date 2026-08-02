@@ -419,7 +419,7 @@ export function ChordPad({
       {/* Chord type grid */}
       {CHORD_GROUPS.map(group => (
         <div key={group.label} className="grid gap-1 sm:grid-cols-[48px_minmax(0,1fr)] sm:items-start">
-          <span className="pt-1 text-right text-[10px] font-black uppercase text-black/55">{group.label}</span>
+          <span className="pt-1 text-right text-[10px] font-black uppercase text-black">{group.label}</span>
           <div className="flex flex-wrap gap-1">
             {group.types.map(type => {
               const def = CHORD_TYPES[type];
@@ -462,7 +462,7 @@ export function ChordPad({
         <div className="flex border-b-2 border-black bg-soft">
           <span className="min-w-[36px] px-1 py-[3px]" aria-hidden="true" />
           {COMMON_CHORD_TYPES.map(type => (
-            <span key={type} className="flex-1 px-0.5 py-[3px] text-center text-[9px] font-black text-black/60">{CHORD_TYPES[type].short || 'M'}</span>
+            <span key={type} className="flex-1 px-0.5 py-[3px] text-center text-[9px] font-black text-black">{CHORD_TYPES[type].short || 'M'}</span>
           ))}
         </div>
         {ROOT_NOTES.map(({ name, semitone }) => (
