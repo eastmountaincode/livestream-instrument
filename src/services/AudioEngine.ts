@@ -5,11 +5,16 @@
  * Q (resonance) and volume controls. Notes activate across all streams.
  *
  * Signal chain per stream:
- *   audioElement → mono → filter(bandpass, Q) → voiceGain → streamGain → masterGain → ...
+ *   audioElement → mono → filter(bandpass, Q) → voiceGain → streamGain → EQ → limiter → masterGain → ...
  *
  * Master chain:
  *   masterGain → compressor → analyser → destination
  */
+
+import {
+  setAudioContextOutput,
+  type AudioOutputChannel,
+} from './audioOutput';
 
 const VOICES_PER_STREAM = 16;
 const DEFAULT_Q = 30;
@@ -20,6 +25,11 @@ const ATTACK = 0.02;
 const RELEASE = 0.3;
 const FADE_TIME = 0.5;
 const VOICE_GAIN_BOOST = 8.0;
+const TRACK_LIMITER_THRESHOLD_DB = -10;
+const TRACK_LIMITER_KNEE_DB = 5;
+const TRACK_LIMITER_RATIO = 12;
+const TRACK_LIMITER_ATTACK_SECONDS = 0.003;
+const TRACK_LIMITER_RELEASE_SECONDS = 0.2;
 const MIN_FILTER_FREQ = 20;
 const KEEPALIVE_GAIN = 0.000001;
 const KEEPALIVE_FREQ = 20;
@@ -95,6 +105,7 @@ interface StreamChannel {
   spectralSnapPeaks: SpectralSnapPeak[];
   highPassFilter: BiquadFilterNode;
   lowPassFilter: BiquadFilterNode;
+  limiter: DynamicsCompressorNode;
   analyser: AnalyserNode;
   panner: StereoPannerNode;
   audioElement: HTMLAudioElement;
@@ -118,6 +129,7 @@ export class AudioEngine {
   masterGain: GainNode;
   compressor: DynamicsCompressorNode;
   analyser: AnalyserNode;
+  outputPanner: StereoPannerNode;
 
   private channels: Map<string, StreamChannel> = new Map();
   private activeNotes: Map<number, ActiveNoteState> = new Map();
@@ -142,10 +154,27 @@ export class AudioEngine {
 
     this.analyser = this.ctx.createAnalyser();
     this.analyser.fftSize = 2048;
+    this.outputPanner = this.ctx.createStereoPanner();
+    this.outputPanner.connect(this.ctx.destination);
 
     this.masterGain.connect(this.compressor);
     this.compressor.connect(this.analyser);
     this.analyser.connect(this.ctx.destination);
+  }
+
+  setOutputDevice(deviceId: string) {
+    return setAudioContextOutput(this.ctx, deviceId);
+  }
+
+  setOutputChannel(channel: AudioOutputChannel) {
+    this.analyser.disconnect();
+    if (channel === 'stereo') {
+      this.analyser.connect(this.ctx.destination);
+      return;
+    }
+
+    this.outputPanner.pan.setValueAtTime(channel === 'left' ? -1 : 1, this.ctx.currentTime);
+    this.analyser.connect(this.outputPanner);
   }
 
   private ensureKeepAlive() {
@@ -195,6 +224,12 @@ export class AudioEngine {
     lowPassFilter.type = 'lowpass';
     lowPassFilter.frequency.value = this.clampLowPassFrequency(DEFAULT_LOW_PASS_FREQ);
     lowPassFilter.Q.value = 0.707;
+    const limiter = this.ctx.createDynamicsCompressor();
+    limiter.threshold.value = TRACK_LIMITER_THRESHOLD_DB;
+    limiter.knee.value = TRACK_LIMITER_KNEE_DB;
+    limiter.ratio.value = TRACK_LIMITER_RATIO;
+    limiter.attack.value = TRACK_LIMITER_ATTACK_SECONDS;
+    limiter.release.value = TRACK_LIMITER_RELEASE_SECONDS;
     const analyser = this.ctx.createAnalyser();
     analyser.fftSize = 256;
     analyser.smoothingTimeConstant = 0.85;
@@ -202,7 +237,8 @@ export class AudioEngine {
     panner.pan.value = 0;
     streamGain.connect(highPassFilter);
     highPassFilter.connect(lowPassFilter);
-    lowPassFilter.connect(analyser);
+    lowPassFilter.connect(limiter);
+    limiter.connect(analyser);
     analyser.connect(panner);
     panner.connect(this.masterGain);
 
@@ -269,6 +305,7 @@ export class AudioEngine {
       spectralSnapPeaks: [],
       highPassFilter,
       lowPassFilter,
+      limiter,
       analyser,
       panner,
       audioElement,
@@ -330,6 +367,7 @@ export class AudioEngine {
       try { ch.streamGain.disconnect(); } catch { /* ok */ }
       try { ch.highPassFilter.disconnect(); } catch { /* ok */ }
       try { ch.lowPassFilter.disconnect(); } catch { /* ok */ }
+      try { ch.limiter.disconnect(); } catch { /* ok */ }
       try { ch.analyser.disconnect(); } catch { /* ok */ }
       try { ch.panner.disconnect(); } catch { /* ok */ }
       ch.audioElement.pause();

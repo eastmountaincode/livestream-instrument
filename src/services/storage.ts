@@ -48,15 +48,18 @@ interface SavedState {
   soloId: string | null;
   masterVolume: number;
   keyboardVolume: number;
+  midiKeyboardEnabled: boolean;
   chordPadVolume: number;
   chordPad: ChordPadState | null;
+  chordBank: ChordSpec[];
   chordSequencer: ChordSequencerState;
   toneMode: ToneMode;
 }
 
-type StoredStateInput = Partial<Omit<SavedState, 'toneMode'>> & {
+type StoredStateInput = Partial<Omit<SavedState, 'toneMode' | 'chordBank'>> & {
   toneMode?: unknown;
   pitchSourceMode?: unknown;
+  chordBank?: unknown;
 };
 
 function load(): StoredStateInput | null {
@@ -102,12 +105,16 @@ function normalizeSavedState(state: StoredStateInput | null): SavedState {
     keyboardVolume: typeof savedKeyboardVolume === 'number' && Number.isFinite(savedKeyboardVolume)
       ? savedKeyboardVolume
       : DEFAULT_KEYBOARD_VOLUME,
+    midiKeyboardEnabled: typeof state?.midiKeyboardEnabled === 'boolean'
+      ? state.midiKeyboardEnabled
+      : true,
     chordPadVolume: typeof savedChordPadVolume === 'number' && Number.isFinite(savedChordPadVolume)
       ? savedChordPadVolume
       : DEFAULT_CHORD_PAD_VOLUME,
     chordPad: savedChordPadState && typeof savedChordPadState === 'object'
       ? normalizeChordPadState(savedChordPadState)
       : null,
+    chordBank: normalizeChordBank(state?.chordBank),
     chordSequencer: normalizeChordSequencerState(state?.chordSequencer),
     toneMode: normalizeToneMode(state?.toneMode ?? state?.pitchSourceMode),
   };
@@ -142,6 +149,15 @@ function normalizeChordPadState(state: Partial<ChordPadState>): ChordPadState {
     inversion,
     active: state.active === true,
   };
+}
+
+function normalizeChordBank(value: unknown): ChordSpec[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .filter((chord): chord is Partial<ChordSpec> => Boolean(chord) && typeof chord === 'object')
+    .slice(0, 8)
+    .map(chord => normalizeChordSpec(chord));
 }
 
 function normalizeChordSequenceEvent(value: unknown): ChordSequenceEvent | null {
@@ -236,6 +252,16 @@ export function getKeyboardVolume(): number {
   return getCurrent().keyboardVolume;
 }
 
+export function saveMidiKeyboardEnabled(midiKeyboardEnabled: boolean): void {
+  const state = getCurrent();
+  state.midiKeyboardEnabled = midiKeyboardEnabled;
+  save(state);
+}
+
+export function getMidiKeyboardEnabled(): boolean {
+  return getCurrent().midiKeyboardEnabled;
+}
+
 export function saveChordPadVolume(chordPadVolume: number): void {
   const state = getCurrent();
   state.chordPadVolume = chordPadVolume;
@@ -254,6 +280,16 @@ export function saveChordPadState(chordPad: ChordPadState): void {
 
 export function getChordPadState(): ChordPadState | null {
   return getCurrent().chordPad;
+}
+
+export function saveChordBank(chordBank: ChordSpec[]): void {
+  const state = getCurrent();
+  state.chordBank = normalizeChordBank(chordBank);
+  save(state);
+}
+
+export function getChordBank(): ChordSpec[] {
+  return getCurrent().chordBank;
 }
 
 export function saveChordSequencerState(chordSequencer: ChordSequencerState): void {

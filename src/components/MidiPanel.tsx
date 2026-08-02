@@ -51,7 +51,8 @@ export function MidiPanel({ clockSource, onClockSourceChange }: Props) {
       setLastMessage(`${source}${event.label}: ${event.data.join(' ')}`);
     });
     const unsubNote = midiService.onNote(event => {
-      setLastNote(event.type === 'on' ? `Note ${event.note} On` : `Note ${event.note} Off`);
+      const source = event.isPad ? 'Pad' : 'Note';
+      setLastNote(`${source} ${event.note} Ch${event.channel} ${event.type === 'on' ? 'On' : 'Off'}`);
     });
     const unsubPitchBend = midiService.onPitchBend(event => {
       const semitones = event.semitones >= 0 ? `+${event.semitones.toFixed(2)}` : event.semitones.toFixed(2);

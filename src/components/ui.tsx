@@ -16,7 +16,7 @@ export function cx(...classes: ClassValue[]) {
 
 interface PanelProps {
   title: string;
-  label: string;
+  label?: string;
   open: boolean;
   onToggle: () => void;
   children: ReactNode;
@@ -36,7 +36,7 @@ export function Panel({ title, label, open, onToggle, children, meta, className,
         aria-expanded={open}
       >
         <span className="flex min-w-0 items-center gap-3">
-          <span className="min-w-8 font-mono text-[10px] font-semibold">{label}</span>
+          {label && <span className="min-w-8 font-mono text-[10px] font-semibold">{label}</span>}
           <span className="truncate">{title}</span>
         </span>
         <span className="flex shrink-0 items-center gap-2 font-mono text-[10px] font-semibold">

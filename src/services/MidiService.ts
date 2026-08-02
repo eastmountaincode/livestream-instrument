@@ -8,10 +8,19 @@ import { audioEngine } from './AudioEngine';
 
 const MIDI_SOURCE = 'midi';
 const PITCH_BEND_RANGE_SEMITONES = 12;
+const PAD_MIDI_CHANNEL = 10;
 
 export type MidiDeviceInfo = { id: string; name: string };
 export type MidiUpdateCallback = () => void;
-export type MidiNoteEvent = { type: 'on' | 'off'; note: number; velocity: number };
+export type MidiNoteEvent = {
+  type: 'on' | 'off';
+  note: number;
+  velocity: number;
+  channel: number;
+  isPad: boolean;
+  inputId?: string;
+  inputName?: string;
+};
 export type MidiPitchBendEvent = { value: number; normalized: number; semitones: number };
 export type MidiMessageEventInfo = { status: number; data: number[]; label: string; inputId?: string; inputName?: string };
 export type MidiClockEvent = { receivedAt: number };
@@ -34,6 +43,7 @@ class MidiService {
   private clockCallbacks: ((event: MidiClockEvent) => void)[] = [];
   private transportCallbacks: ((event: MidiTransportEvent) => void)[] = [];
   private inputVolume = 1;
+  private keyboardInputEnabled = true;
   private activeNotes: Map<number, HeldMidiNote> = new Map();
   private handleMidiMessage = (event: Event) => this.handleMidiMessageEvent(event);
   private handleStateChange = () => this.handleMidiStateChange();
@@ -49,6 +59,9 @@ class MidiService {
     this.transportCallbacks ??= [];
     this.activeNotes ??= new Map();
     this.inputVolume = Number.isFinite(this.inputVolume) ? Math.max(0, this.inputVolume) : 1;
+    this.keyboardInputEnabled = typeof this.keyboardInputEnabled === 'boolean'
+      ? this.keyboardInputEnabled
+      : true;
     this.handleMidiMessage = (event: Event) => this.handleMidiMessageEvent(event);
     this.handleStateChange = () => this.handleMidiStateChange();
     this.initPromise ??= null;
@@ -125,6 +138,27 @@ class MidiService {
 
   getSelectedInputId() { return this.selectedInput?.id || null; }
   getSelectedOutputId() { return this.selectedOutput?.id || null; }
+
+  setKeyboardInputEnabled(enabled: boolean) {
+    if (this.keyboardInputEnabled === enabled) return;
+    this.keyboardInputEnabled = enabled;
+
+    if (!enabled) {
+      for (const note of this.activeNotes.keys()) {
+        this.notifyNote({
+          type: 'off',
+          note,
+          velocity: 0,
+          channel: 1,
+          isPad: false,
+        });
+      }
+      this.activeNotes.clear();
+      audioEngine.allNotesOff(MIDI_SOURCE);
+    }
+
+    this.notifyListeners();
+  }
 
   setInputVolume(volume: number) {
     this.inputVolume = Number.isFinite(volume) ? Math.max(0, volume) : 1;
@@ -292,12 +326,14 @@ class MidiService {
     const input = eventTarget && 'id' in eventTarget && 'name' in eventTarget
       ? eventTarget as MIDIInput
       : undefined;
+    const inputId = input?.id;
+    const inputName = input?.name || input?.id;
     this.notifyMessage({
       status,
       data: Array.from(data),
       label: this.getMessageLabel(status),
-      inputId: input?.id,
-      inputName: input?.name || input?.id,
+      inputId,
+      inputName,
     });
 
     if (status === 0xF8) {
@@ -314,24 +350,30 @@ class MidiService {
     if ((status & 0xF0) === 0x90 && data.length >= 3) {
       const note = data[1];
       const velocity = data[2];
+      const channel = (status & 0x0F) + 1;
+      const isPad = channel === PAD_MIDI_CHANNEL;
       if (velocity > 0) {
-        const held = this.activeNotes.get(note);
-        if (held) {
-          held.count += 1;
-          held.velocity = Math.max(held.velocity, velocity);
-        } else {
-          this.activeNotes.set(note, { count: 1, velocity });
+        if (!isPad && this.keyboardInputEnabled) {
+          const held = this.activeNotes.get(note);
+          if (held) {
+            held.count += 1;
+            held.velocity = Math.max(held.velocity, velocity);
+          } else {
+            this.activeNotes.set(note, { count: 1, velocity });
+          }
+          audioEngine.noteOn(note, this.scaleVelocity(velocity), MIDI_SOURCE);
         }
-        audioEngine.noteOn(note, this.scaleVelocity(velocity), MIDI_SOURCE);
-        this.notifyNote({ type: 'on', note, velocity });
+        if (isPad || this.keyboardInputEnabled) {
+          this.notifyNote({ type: 'on', note, velocity, channel, isPad, inputId, inputName });
+        }
       } else {
-        this.releaseMidiNote(note);
+        this.releaseMidiNote(note, channel, inputId, inputName);
       }
     }
 
     // Note off: 0x80-0x8F
     if ((status & 0xF0) === 0x80 && data.length >= 3) {
-      this.releaseMidiNote(data[1]);
+      this.releaseMidiNote(data[1], (status & 0x0F) + 1, inputId, inputName);
     }
 
     // Pitch bend: 0xE0-0xEF, 14-bit little-endian value centered at 8192
@@ -354,7 +396,15 @@ class MidiService {
     }
   }
 
-  private releaseMidiNote(note: number) {
+  private releaseMidiNote(note: number, channel: number, inputId?: string, inputName?: string) {
+    const isPad = channel === PAD_MIDI_CHANNEL;
+    if (isPad) {
+      this.notifyNote({ type: 'off', note, velocity: 0, channel, isPad, inputId, inputName });
+      return;
+    }
+
+    if (!this.keyboardInputEnabled) return;
+
     const held = this.activeNotes.get(note);
     if (!held) return;
 
@@ -365,7 +415,7 @@ class MidiService {
     }
 
     audioEngine.noteOff(note, MIDI_SOURCE);
-    this.notifyNote({ type: 'off', note, velocity: 0 });
+    this.notifyNote({ type: 'off', note, velocity: 0, channel, isPad, inputId, inputName });
   }
 }
 

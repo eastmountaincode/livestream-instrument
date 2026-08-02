@@ -1,9 +1,11 @@
-import { useState, useCallback, useRef, useEffect, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { Minus, Plus } from 'lucide-react';
 import { audioEngine } from '../services/AudioEngine';
+import { midiService } from '../services/MidiService';
 import { webrtcService } from '../services/WebRTCService';
-import { getChordPadState, saveChordPadState, type ChordPadState } from '../services/storage';
+import { getChordBank, getChordPadState, saveChordBank, saveChordPadState, type ChordPadState } from '../services/storage';
 import {
+  buildRelatedChordBank,
   buildChordNotes,
   CHORD_GROUPS,
   CHORD_TYPES,
@@ -13,6 +15,7 @@ import {
   DEFAULT_CHORD_VELOCITY,
   getChordLabel,
   NOTE_NAMES,
+  normalizeChordSpec,
   ROOT_NOTES,
   scaleChordVelocity,
   type ChordPerformanceEvent,
@@ -20,6 +23,9 @@ import {
 } from '../music/chords';
 
 const CHORD_PAD_SOURCE = 'chord-pad';
+const COMMON_CHORD_TYPES = ['maj', 'min', 'maj7', 'min7', 'min9', 'maj9', 'min11', 'sus4'];
+const MPK_MINI_IV_PAD_NOTES = [36, 37, 38, 39, 40, 41, 42, 43];
+const MPK_MINI_IV_PAD_INDEX = new Map(MPK_MINI_IV_PAD_NOTES.map((note, index) => [note, index]));
 
 const AUTO_CHORD_RETRY_DELAY_MS = 250;
 const MAX_AUTO_CHORD_RETRIES = 20;
@@ -61,6 +67,7 @@ export function ChordPad({
 }: Props) {
   const octave = 3; // Base octave 3 (C3 = MIDI 48)
   const [initialChordPadState] = useState(() => getInitialChordPadState());
+  const [chordBank, setChordBank] = useState(() => getChordBank());
   const [selectedRoot, setSelectedRoot] = useState(() => initialChordPadState?.selectedRoot ?? DEFAULT_CHORD.root);
   const [selectedType, setSelectedType] = useState(() => initialChordPadState?.selectedType ?? DEFAULT_CHORD.type);
   const [latched, setLatched] = useState(true);
@@ -73,6 +80,7 @@ export function ChordPad({
   const shouldAutoPlayInitialChordRef = useRef(initialChordPadState?.active ?? autoPlayDefaultChord);
   const performanceEventIdRef = useRef(0);
   const performanceChordRef = useRef<ChordSpec | null>(null);
+  const activeMidiPadNoteRef = useRef<number | null>(null);
 
   const rememberChordState = useCallback((root: number, type: string, inv: number, active: boolean) => {
     if (!CHORD_TYPES[type]) return;
@@ -85,7 +93,7 @@ export function ChordPad({
   }, []);
 
   // Play a chord (release previous, play new)
-  const playChord = useCallback((notes: number[]) => {
+  const playChord = useCallback((notes: number[], velocity = DEFAULT_CHORD_VELOCITY) => {
     if (!streamConnected || !audioEngine.isStreamConnected()) return false;
 
     const previousNotes = prevNotes.current;
@@ -98,10 +106,10 @@ export function ChordPad({
     audioEngine.allNotesOff(CHORD_PAD_SOURCE);
 
     for (const n of notes) {
-      const scaledVelocity = scaleChordVelocity(DEFAULT_CHORD_VELOCITY, inputVolume);
+      const scaledVelocity = scaleChordVelocity(velocity, inputVolume);
       const accepted = audioEngine.noteOn(n, scaledVelocity, CHORD_PAD_SOURCE);
       if (!accepted) continue;
-      webrtcService.sendNoteOn(n, DEFAULT_CHORD_VELOCITY);
+      webrtcService.sendNoteOn(n, velocity);
       acceptedNotes.push(n);
     }
     prevNotes.current = acceptedNotes;
@@ -114,9 +122,9 @@ export function ChordPad({
     rememberChordState(root, type, inv, active);
   }, [rememberChordState]);
 
-  const activateChord = useCallback((root: number, type: string, inv: number) => {
+  const activateChord = useCallback((root: number, type: string, inv: number, velocity = DEFAULT_CHORD_VELOCITY) => {
     const notes = buildChordNotes({ root, type, inversion: inv }, octave);
-    const played = playChord(notes);
+    const played = playChord(notes, velocity);
     setChordActivity(root, type, inv, played);
     return played;
   }, [octave, playChord, setChordActivity]);
@@ -145,6 +153,7 @@ export function ChordPad({
     }
     audioEngine.allNotesOff(CHORD_PAD_SOURCE);
     prevNotes.current = [];
+    activeMidiPadNoteRef.current = null;
     autoChordPlayedRef.current = true;
     setChordActivity(
       activeChord?.root ?? selectedRoot,
@@ -216,30 +225,41 @@ export function ChordPad({
     return () => window.clearTimeout(retryTimer);
   }, [autoChordRetry, inversion, octave, playChord, selectedRoot, selectedType, setChordActivity, streamConnected]);
 
-  const startChord = (root: number, type: string) => {
-    setSelectedRoot(root);
-    setSelectedType(type);
+  const startChord = useCallback((
+    root: number,
+    type: string,
+    nextInversion = inversion,
+    velocity = DEFAULT_CHORD_VELOCITY,
+  ) => {
+    const chord = normalizeChordSpec({ root, type, inversion: nextInversion });
+    setSelectedRoot(chord.root);
+    setSelectedType(chord.type);
+    setInversion(chord.inversion);
     autoChordPlayedRef.current = true;
-    const chord = { root, type, inversion };
     performanceChordRef.current = chord;
-    activateChord(root, type, inversion);
+    activateChord(chord.root, chord.type, chord.inversion, velocity);
     emitPerformanceEvent('start', chord, !latched);
-  };
+  }, [activateChord, emitPerformanceEvent, inversion, latched]);
 
-  const handleLatchedChordTrigger = (root: number, type: string) => {
+  const handleLatchedChordTrigger = useCallback((
+    root: number,
+    type: string,
+    nextInversion = inversion,
+    velocity = DEFAULT_CHORD_VELOCITY,
+  ) => {
     if (activeChordKey === chordKey(root, type)) {
       releaseAll();
       return;
     }
-    startChord(root, type);
-  };
+    startChord(root, type, nextInversion, velocity);
+  }, [activeChordKey, inversion, releaseAll, startChord]);
 
-  const handleChordPointerDown = (event: ReactPointerEvent<HTMLButtonElement>, root: number, type: string) => {
+  const handleChordPointerDown = (event: ReactPointerEvent<HTMLButtonElement>, root: number, type: string, nextInversion = inversion) => {
     if (latched || event.button !== 0) return;
 
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
-    startChord(root, type);
+    startChord(root, type, nextInversion);
   };
 
   const handleChordPointerEnd = (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -252,11 +272,11 @@ export function ChordPad({
     releaseAll();
   };
 
-  const handleChordKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>, root: number, type: string) => {
+  const handleChordKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>, root: number, type: string, nextInversion = inversion) => {
     if (latched || event.repeat || !isChordTriggerKey(event.key)) return;
 
     event.preventDefault();
-    startChord(root, type);
+    startChord(root, type, nextInversion);
   };
 
   const handleChordKeyUp = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
@@ -265,6 +285,29 @@ export function ChordPad({
     event.preventDefault();
     releaseAll();
   };
+
+  useEffect(() => midiService.onNote(event => {
+    if (!event.isPad) return;
+    const padIndex = MPK_MINI_IV_PAD_INDEX.get(event.note);
+    if (padIndex === undefined) return;
+    const chord = chordBank[padIndex];
+    if (!chord) return;
+
+    if (event.type === 'on') {
+      if (latched) {
+        handleLatchedChordTrigger(chord.root, chord.type, chord.inversion);
+      } else {
+        activeMidiPadNoteRef.current = event.note;
+        startChord(chord.root, chord.type, chord.inversion, event.velocity);
+      }
+      return;
+    }
+
+    if (!latched && activeMidiPadNoteRef.current === event.note) {
+      activeMidiPadNoteRef.current = null;
+      releaseAll();
+    }
+  }), [chordBank, handleLatchedChordTrigger, latched, releaseAll, startChord]);
 
   const handleLatchToggle = () => {
     if (latched) {
@@ -278,6 +321,15 @@ export function ChordPad({
 
   const chordLabel = getChordLabel({ root: selectedRoot, type: selectedType, inversion });
   const maxInversion = (CHORD_TYPES[selectedType]?.intervals.length || 3) - 1;
+  const bankChordsByKey = useMemo(
+    () => new Map(chordBank.map(chord => [chordKey(chord.root, chord.type), chord])),
+    [chordBank],
+  );
+  const handleBuildChordBank = () => {
+    const nextBank = buildRelatedChordBank({ root: selectedRoot, type: selectedType, inversion });
+    setChordBank(nextBank);
+    saveChordBank(nextBank);
+  };
 
   return (
     <div className="grid gap-3">
@@ -328,7 +380,14 @@ export function ChordPad({
           </button>
         </div>
         <button
+          type="button"
           className="ml-auto h-7 border-2 border-black bg-white px-2 font-mono text-[10px] font-black uppercase text-black hover:bg-black hover:text-white"
+          onClick={handleBuildChordBank}
+        >
+          Build Bank From Current
+        </button>
+        <button
+          className="h-7 border-2 border-black bg-white px-2 font-mono text-[10px] font-black uppercase text-black hover:bg-black hover:text-white"
           onClick={releaseAll}
         >Release</button>
       </div>
@@ -402,37 +461,43 @@ export function ChordPad({
         <div className="min-w-[520px]">
         <div className="flex border-b-2 border-black bg-soft">
           <span className="min-w-[36px] px-1 py-[3px]" aria-hidden="true" />
-          {['maj', 'min', 'maj7', 'min7', 'min9', 'min11', 'sus4'].map(type => (
+          {COMMON_CHORD_TYPES.map(type => (
             <span key={type} className="flex-1 px-0.5 py-[3px] text-center text-[9px] font-black text-black/60">{CHORD_TYPES[type].short || 'M'}</span>
           ))}
         </div>
         {ROOT_NOTES.map(({ name, semitone }) => (
           <div key={semitone} className="flex border-t border-black first:border-t-0">
             <span className={`flex min-w-[36px] items-center justify-center px-1 py-[3px] text-center text-[10px] font-black ${name.includes('#') ? 'bg-black text-white' : 'bg-white text-black'}`}>{name}</span>
-            {['maj', 'min', 'maj7', 'min7', 'min9', 'min11', 'sus4'].map(type => (
-              <button
-                key={type}
-                className={`flex-1 border-l border-black px-0.5 py-1 text-center font-mono text-[9px] font-black ${
-                  activeChordKey === chordKey(semitone, type)
-                    ? 'bg-black text-white'
-                    : selectedRoot === semitone && selectedType === type
-                      ? 'bg-soft text-black hover:bg-black hover:text-white'
-                      : 'bg-white text-black hover:bg-black hover:text-white'
-                }`}
-                onClick={() => {
-                  if (latched) handleLatchedChordTrigger(semitone, type);
-                }}
-                onPointerDown={event => handleChordPointerDown(event, semitone, type)}
-                onPointerUp={handleChordPointerEnd}
-                onPointerCancel={handleChordPointerEnd}
-                onKeyDown={event => handleChordKeyDown(event, semitone, type)}
-                onKeyUp={handleChordKeyUp}
-                aria-label={`Play ${name} ${CHORD_TYPES[type].label}`}
-                aria-pressed={activeChordKey === chordKey(semitone, type)}
-              >
-                {name}{CHORD_TYPES[type].short || ''}
-              </button>
-            ))}
+            {COMMON_CHORD_TYPES.map(type => {
+              const bankChord = bankChordsByKey.get(chordKey(semitone, type));
+              const chordInversion = bankChord?.inversion ?? inversion;
+              return (
+                <button
+                  key={type}
+                  className={`flex-1 border-l border-black px-0.5 py-1 text-center font-mono text-[9px] font-black ${
+                    activeChordKey === chordKey(semitone, type)
+                      ? 'bg-black text-white'
+                      : bankChord
+                        ? 'bg-ground text-black hover:bg-black hover:text-white'
+                      : selectedRoot === semitone && selectedType === type
+                        ? 'bg-soft text-black hover:bg-black hover:text-white'
+                        : 'bg-white text-black hover:bg-black hover:text-white'
+                  }`}
+                  onClick={() => {
+                    if (latched) handleLatchedChordTrigger(semitone, type, chordInversion);
+                  }}
+                  onPointerDown={event => handleChordPointerDown(event, semitone, type, chordInversion)}
+                  onPointerUp={handleChordPointerEnd}
+                  onPointerCancel={handleChordPointerEnd}
+                  onKeyDown={event => handleChordKeyDown(event, semitone, type, chordInversion)}
+                  onKeyUp={handleChordKeyUp}
+                  aria-label={`Play ${name} ${CHORD_TYPES[type].label}`}
+                  aria-pressed={activeChordKey === chordKey(semitone, type)}
+                >
+                  {name}{CHORD_TYPES[type].short || ''}
+                </button>
+              );
+            })}
           </div>
         ))}
         </div>

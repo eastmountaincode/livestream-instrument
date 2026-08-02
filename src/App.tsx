@@ -28,6 +28,7 @@ const DEFAULT_DEMO_SOURCE_IDS = ['locus-usti-nad-labem-duul', 'locus-jasper-ridg
 const EMPTY_STREAM_SETTINGS: Record<string, Partial<StreamSettings>> = {};
 const SOURCE_LOAD_RETRIES = 3;
 const SOURCE_LOAD_RETRY_DELAY_MS = 700;
+const SHOW_CHORD_SEQUENCER = false;
 const DEFAULT_DEMO_STREAM_SETTINGS: Record<string, Partial<StreamSettings>> = {
   'locus-usti-nad-labem-duul': {
     filterQ: 46,
@@ -261,7 +262,6 @@ function App() {
           <div className="flex lg:w-[340px] lg:shrink-0">
             <Panel
               title="Live Sources"
-              label="01"
               open={openPanels.sources}
               onToggle={() => togglePanel('sources')}
               meta={`${activeIds.size}/${availableSources.length}`}
@@ -284,7 +284,6 @@ function App() {
           <div className="flex lg:min-w-0 lg:flex-1">
             <Panel
               title="Keyboard"
-              label="03"
               open={openPanels.keyboard}
               onToggle={() => togglePanel('keyboard')}
               className={shouldEqualizeTopPanels ? 'h-full' : ''}
@@ -296,7 +295,6 @@ function App() {
 
         <Panel
           title="Track Mixer"
-          label="02"
           open={openPanels.mixer}
           onToggle={() => togglePanel('mixer')}
           meta={`${activeIds.size} Tracks`}
@@ -317,7 +315,6 @@ function App() {
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_340px]">
           <Panel
             title="Chord Pad"
-            label="04"
             open={openPanels.chords}
             onToggle={() => togglePanel('chords')}
             className="self-start"
@@ -334,7 +331,6 @@ function App() {
 
           <Panel
             title="MIDI / Sync"
-            label="05"
             open={openPanels.io}
             onToggle={() => togglePanel('io')}
             className="self-start"
@@ -346,27 +342,28 @@ function App() {
           </Panel>
         </div>
 
-        <Panel
-          title="Chord Sequencer"
-          label="06"
-          open={openPanels.sequencer}
-          onToggle={() => togglePanel('sequencer')}
-          keepMounted
-        >
-          <ChordSequencer
-            streamConnected={streamConnected}
-            inputVolume={chordPadVolume}
-            selectedChord={selectedChord}
-            performanceEvent={chordPerformanceEvent}
-            clockSource={sequencerClockSource}
-          />
-        </Panel>
+        {SHOW_CHORD_SEQUENCER && (
+          <Panel
+            title="Chord Sequencer"
+            open={openPanels.sequencer}
+            onToggle={() => togglePanel('sequencer')}
+            keepMounted
+          >
+            <ChordSequencer
+              streamConnected={streamConnected}
+              inputVolume={chordPadVolume}
+              selectedChord={selectedChord}
+              performanceEvent={chordPerformanceEvent}
+              clockSource={sequencerClockSource}
+            />
+          </Panel>
+        )}
 
         <Panel
           title="Settings"
-          label="07"
           open={openPanels.settings}
           onToggle={() => togglePanel('settings')}
+          keepMounted
         >
           <SettingsPanel />
         </Panel>

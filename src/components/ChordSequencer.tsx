@@ -482,6 +482,7 @@ export function ChordSequencer({
   }, [commitSteps, finalizeRecordedHold, performanceEvent]);
 
   useEffect(() => midiService.onNote(event => {
+    if (event.isPad) return;
     if (!recordingRef.current) return;
 
     if (event.type === 'on') {

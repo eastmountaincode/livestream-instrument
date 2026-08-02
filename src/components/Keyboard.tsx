@@ -128,6 +128,7 @@ export function Keyboard({ streamConnected, inputVolume }: Props) {
   }, [activeNotes, inputVolume]);
 
   useEffect(() => midiService.onNote(event => {
+    if (event.isPad) return;
     setActiveMidiNotes(prev => {
       const next = new Set(prev);
       if (event.type === 'on') {

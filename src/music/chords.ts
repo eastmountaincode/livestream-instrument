@@ -55,6 +55,88 @@ export const CHORD_GROUPS: { label: string; types: string[] }[] = [
   { label: '6ths', types: ['6', 'min6'] },
 ];
 
+const MINOR_TONIC_TYPES = new Set(['min', 'min6', 'min7', 'min9', 'min11']);
+
+interface ChordBankPalette {
+  major: string;
+  minor: string;
+}
+
+interface ChordBankRule {
+  rootOffset: number;
+  type: string;
+  inversion?: number;
+}
+
+function wrapRoot(root: number): number {
+  return ((root % 12) + 12) % 12;
+}
+
+function getChordBankPalette(type: string): ChordBankPalette {
+  switch (type) {
+    case 'min11':
+      return { major: 'maj9', minor: 'min11' };
+    case 'min9':
+      return { major: 'maj9', minor: 'min9' };
+    case 'min7':
+      return { major: 'maj7', minor: 'min7' };
+    case 'min6':
+      return { major: '6', minor: 'min6' };
+    case 'min':
+      return { major: 'maj', minor: 'min' };
+    case 'maj9':
+    case 'add9':
+      return { major: 'maj9', minor: 'min11' };
+    case 'maj7':
+      return { major: 'maj7', minor: 'min7' };
+    case '6':
+      return { major: '6', minor: 'min6' };
+    case '13':
+      return { major: 'maj9', minor: 'min9' };
+    case '11':
+      return { major: 'maj9', minor: 'min11' };
+    case '9':
+      return { major: 'maj9', minor: 'min9' };
+    case '7':
+      return { major: 'maj7', minor: 'min7' };
+    default:
+      return { major: 'maj', minor: 'min' };
+  }
+}
+
+export function buildRelatedChordBank(chord: ChordSpec): ChordSpec[] {
+  const current = normalizeChordSpec(chord);
+  const palette = getChordBankPalette(current.type);
+  const minorContext = MINOR_TONIC_TYPES.has(current.type);
+  const colorRules: ChordBankRule[] = [
+    { rootOffset: 1, type: 'maj9' },
+    { rootOffset: 2, type: 'min11' },
+    { rootOffset: 3, type: 'min11' },
+    { rootOffset: 10, type: 'min11' },
+    { rootOffset: 10, type: 'maj9' },
+  ];
+  const contextualRules: ChordBankRule[] = minorContext
+    ? [
+        { rootOffset: 5, type: palette.minor },
+        { rootOffset: 7, type: palette.minor },
+      ]
+    : [
+        { rootOffset: 4, type: palette.minor },
+        { rootOffset: 11, type: palette.minor },
+      ];
+  const templates = [
+    { rootOffset: 0, type: current.type },
+    ...colorRules,
+    ...contextualRules,
+  ];
+
+  return templates.map(({ rootOffset, type, inversion }, index) => normalizeChordSpec({
+    root: wrapRoot(current.root + rootOffset),
+    type,
+    inversion: index === 0 ? current.inversion : inversion ?? 0,
+  }));
+}
+
 export function clampInversion(type: string, inversion: number): number {
   const maxInversion = (CHORD_TYPES[type]?.intervals.length || 3) - 1;
   return Math.min(maxInversion, Math.max(0, Math.round(inversion)));
