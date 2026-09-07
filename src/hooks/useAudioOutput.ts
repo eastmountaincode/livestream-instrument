@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { useRef, useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import {
   DEFAULT_AUDIO_OUTPUT,
   readAudioOutputChannelPreference,
@@ -43,6 +43,12 @@ export function useAudioOutput(
   applyOutput: (deviceId: string) => Promise<void>,
   applyChannel: (channel: AudioOutputChannel) => void | Promise<void>,
 ) {
+  const pending = useRef(Promise.resolve());
+  const enqueue = useCallback((operation: () => Promise<void>) => {
+    const next = pending.current.then(operation);
+    pending.current = next.catch(() => undefined);
+    return next;
+  }, []);
   const [choosing, setChoosing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [outputs, setOutputs] = useState<AudioOutputDevice[]>([
@@ -50,6 +56,7 @@ export function useAudioOutput(
   ]);
   const [selected, setSelected] = useState<AudioOutputDevice>(DEFAULT_AUDIO_OUTPUT);
   const [channel, setChannel] = useState<AudioOutputChannel>('stereo');
+  const channelRef = useRef<AudioOutputChannel>("stereo");
   const supported = useSyncExternalStore(
     subscribeToOutputSupport,
     supportsAudioOutputRouting,
@@ -60,31 +67,55 @@ export function useAudioOutput(
     if (!supported) return;
     let active = true;
 
-    void Promise.resolve().then(() => {
+    void enqueue(async () => {
       if (!active) return;
       const stored = readAudioOutputPreference(window.localStorage);
       const storedChannel = readAudioOutputChannelPreference(window.localStorage);
       setSelected(stored);
       setChannel(storedChannel);
+      channelRef.current = storedChannel;
       setOutputs((current) => includeSelectedOutput(current, stored));
-      void applyOutput(stored.deviceId);
-      void applyChannel(storedChannel);
+      try {
+        await applyOutput(stored.deviceId);
+        if (active) await applyChannel(storedChannel);
+      } catch (selectionError) {
+        if (active) setError(outputSelectionError(selectionError));
+      }
     });
 
     return () => {
       active = false;
     };
-  }, [applyChannel, applyOutput, supported]);
+  }, [applyChannel, applyOutput, enqueue, supported]);
+
+  useEffect(() => {
+    if (!supported || !selected.deviceId) return;
+    const checkDevice = () => {
+      void enqueue(async () => {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        if (devices.some((device) => device.kind === "audiooutput" && device.deviceId === selected.deviceId)) return;
+        try {
+          await applyOutput(selected.deviceId);
+        } catch {
+          // The engine disconnects its output before attempting the missing sink.
+        }
+        setError("Output unavailable. Choose an audio device to resume.");
+      }).catch((error) => setError(outputSelectionError(error)));
+    };
+    navigator.mediaDevices.addEventListener("devicechange", checkDevice);
+    return () => navigator.mediaDevices.removeEventListener("devicechange", checkDevice);
+  }, [applyOutput, enqueue, selected.deviceId, supported]);
 
   const commitOutput = useCallback(
-    async (output: AudioOutputDevice) => {
+    (output: AudioOutputDevice) => enqueue(async () => {
       await applyOutput(output.deviceId);
       setSelected(output);
       setOutputs((current) => includeSelectedOutput(current, output));
       writeAudioOutputPreference(window.localStorage, output);
+      await applyChannel(channelRef.current);
       setError(null);
-    },
-    [applyOutput],
+    }),
+    [applyChannel, applyOutput, enqueue],
   );
 
   const choose = useCallback(async () => {
@@ -100,6 +131,9 @@ export function useAudioOutput(
 
       const available = await revealAudioOutputs();
       setOutputs(includeSelectedOutput(available, selected));
+      if (available.some(({ deviceId }) => deviceId === selected.deviceId)) {
+        await commitOutput(selected);
+      }
       if (available.length === 1) {
         setError('No additional audio outputs were found.');
       }
@@ -113,7 +147,7 @@ export function useAudioOutput(
   const select = useCallback(
     async (deviceId: string) => {
       const output = outputs.find((option) => option.deviceId === deviceId);
-      if (!output || output.deviceId === selected.deviceId) return;
+      if (!output) return;
       setError(null);
       try {
         await commitOutput(output);
@@ -121,17 +155,22 @@ export function useAudioOutput(
         setError(outputSelectionError(selectionError));
       }
     },
-    [commitOutput, outputs, selected.deviceId],
+    [commitOutput, outputs],
   );
 
   const selectChannel = useCallback(
-    async (nextChannel: AudioOutputChannel) => {
-      if (nextChannel === channel) return;
-      await applyChannel(nextChannel);
-      setChannel(nextChannel);
-      writeAudioOutputChannelPreference(window.localStorage, nextChannel);
-    },
-    [applyChannel, channel],
+    (nextChannel: AudioOutputChannel) => enqueue(async () => {
+      try {
+        await applyChannel(nextChannel);
+        setChannel(nextChannel);
+        channelRef.current = nextChannel;
+        writeAudioOutputChannelPreference(window.localStorage, nextChannel);
+        setError(null);
+      } catch (selectionError) {
+        setError(outputSelectionError(selectionError));
+      }
+    }),
+    [applyChannel, enqueue],
   );
 
   return {

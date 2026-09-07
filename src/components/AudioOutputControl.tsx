@@ -1,3 +1,4 @@
+import { AUDIO_OUTPUT_CHANNELS } from "../services/audioOutput";
 import type {
   AudioOutputChannel,
   AudioOutputDevice,
@@ -48,16 +49,16 @@ export function AudioOutputControl({
         {choosing ? 'Choosing…' : 'Choose…'}
       </UiButton>
       <label htmlFor="audio-output-channel" className="text-[10px] font-semibold uppercase text-copy">
-        Output channel
+        Output channels
       </label>
       <UiSelect
         id="audio-output-channel"
         onChange={(event) => void onChannelChange(event.target.value as AudioOutputChannel)}
         value={channel}
       >
-        <option value="stereo">Stereo</option>
-        <option value="left">Channel 1</option>
-        <option value="right">Channel 2</option>
+        {AUDIO_OUTPUT_CHANNELS.map((option) => (
+          <option key={option.value} value={option.value}>{option.label}</option>
+        ))}
       </UiSelect>
       {error ? (
         <span className="text-[10px] text-copy" role="alert">

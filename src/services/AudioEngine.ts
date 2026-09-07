@@ -1,3 +1,4 @@
+import { createAudioOutputRouter } from "./audioOutputRouter";
 /**
  * Resonant Filter Instrument Engine
  *
@@ -12,7 +13,6 @@
  */
 
 import {
-  setAudioContextOutput,
   type AudioOutputChannel,
 } from './audioOutput';
 
@@ -135,7 +135,7 @@ export class AudioEngine {
   masterGain: GainNode;
   compressor: DynamicsCompressorNode;
   analyser: AnalyserNode;
-  outputPanner: StereoPannerNode;
+  private outputRouter: ReturnType<typeof createAudioOutputRouter>;
 
   private channels: Map<string, StreamChannel> = new Map();
   private activeNotes: Map<number, ActiveNoteState> = new Map();
@@ -163,27 +163,19 @@ export class AudioEngine {
 
     this.analyser = this.ctx.createAnalyser();
     this.analyser.fftSize = 2048;
-    this.outputPanner = this.ctx.createStereoPanner();
-    this.outputPanner.connect(this.ctx.destination);
+    this.outputRouter = createAudioOutputRouter(this.ctx);
 
     this.masterGain.connect(this.compressor);
     this.compressor.connect(this.analyser);
-    this.analyser.connect(this.ctx.destination);
+    this.analyser.connect(this.outputRouter.input);
   }
 
   setOutputDevice(deviceId: string) {
-    return setAudioContextOutput(this.ctx, deviceId);
+    return this.outputRouter.setDevice(deviceId);
   }
 
   setOutputChannel(channel: AudioOutputChannel) {
-    this.analyser.disconnect();
-    if (channel === 'stereo') {
-      this.analyser.connect(this.ctx.destination);
-      return;
-    }
-
-    this.outputPanner.pan.setValueAtTime(channel === 'left' ? -1 : 1, this.ctx.currentTime);
-    this.analyser.connect(this.outputPanner);
+    this.outputRouter.setChannel(channel);
   }
 
   private ensureKeepAlive() {
@@ -195,7 +187,7 @@ export class AudioEngine {
     oscillator.frequency.value = KEEPALIVE_FREQ;
     gain.gain.value = KEEPALIVE_GAIN;
     oscillator.connect(gain);
-    gain.connect(this.ctx.destination);
+    gain.connect(this.outputRouter.input);
     oscillator.start();
 
     this.keepAliveOscillator = oscillator;

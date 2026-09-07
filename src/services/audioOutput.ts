@@ -3,7 +3,16 @@ export interface AudioOutputDevice {
   label: string;
 }
 
-export type AudioOutputChannel = 'stereo' | 'left' | 'right';
+export type AudioOutputChannel = "stereo" | "left" | "right" | "pair-3" | "pair-5" | "pair-7" | "pair-9" | "pair-11" | "pair-13" | "pair-15";
+
+export const AUDIO_OUTPUT_CHANNELS: { value: AudioOutputChannel; label: string }[] = [
+  { value: "stereo", label: "1–2 (Stereo)" },
+  ...([3, 5, 7, 9, 11, 13, 15] as const).map((start) => ({
+    value: `pair-${start}` as AudioOutputChannel, label: `${start}–${start + 1}`,
+  })),
+  { value: "left", label: "Channel 1 (Mono)" },
+  { value: "right", label: "Channel 2 (Mono)" },
+];
 
 export const DEFAULT_AUDIO_OUTPUT = {
   deviceId: '',
@@ -144,7 +153,7 @@ export function readAudioOutputChannelPreference(
 ): AudioOutputChannel {
   try {
     const stored = storage.getItem(AUDIO_OUTPUT_CHANNEL_STORAGE_KEY);
-    return stored === 'left' || stored === 'right' ? stored : 'stereo';
+    return AUDIO_OUTPUT_CHANNELS.find(({ value }) => value === stored)?.value ?? "stereo";
   } catch {
     return 'stereo';
   }
