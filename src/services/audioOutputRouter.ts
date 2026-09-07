@@ -56,12 +56,15 @@ export function createAudioOutputRouter(context: BaseAudioContext) {
       merger = context.createChannelMerger(destination.channelCount);
       merger.channelInterpretation = "discrete";
       if (channel === "left" || channel === "right") {
+        // Preserve mono panner gain: do not duplicate mono before hard panning.
+        input.channelCountMode = "max";
         panner.pan.setValueAtTime(
           channel === "left" ? -1 : 1,
           context.currentTime,
         );
         input.connect(panner).connect(splitter);
       } else {
+        input.channelCountMode = "explicit";
         input.connect(splitter);
       }
       splitter.connect(merger, 0, left);

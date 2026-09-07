@@ -160,7 +160,7 @@ function check(value, message) {
           b
             .getChannelData(ch)
             .every((x) =>
-              ch === (side === "left" ? 0 : 1) ? x > 0 : Math.abs(x) < 1e-6,
+              ch === (side === "left" ? 0 : 1) ? Math.abs(x - 0.125) < 1e-6 : Math.abs(x) < 1e-6,
             ),
           `wrong mono side ${ch}`,
         );
