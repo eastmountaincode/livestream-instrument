@@ -532,8 +532,8 @@ export const STREAM_CANDIDATE_SEEDS: StreamCandidate[] = ([
     pageUrl: 'https://locusonus.org/soundmap/server/',
     format: 'MP3 Icecast',
     source: 'Locus Sonus / CreaCast',
-    status: 'accepted',
-    notes: 'Active Seoul feed listed as weatherreport on the Icecast status endpoint. Candidate for dense city ambience.',
+    status: 'rejected',
+    notes: 'Removed from live sources on 2026-09-17: reported offline and no longer connecting. Previously listed as weatherreport on the Icecast status endpoint.',
   },
   {
     id: 'locus-brno-luzanky',
