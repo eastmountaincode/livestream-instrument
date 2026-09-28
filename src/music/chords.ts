@@ -57,84 +57,25 @@ export const CHORD_GROUPS: { label: string; types: string[] }[] = [
 
 const MINOR_TONIC_TYPES = new Set(['min', 'min6', 'min7', 'min9', 'min11']);
 
-interface ChordBankPalette {
-  major: string;
-  minor: string;
-}
-
-interface ChordBankRule {
-  rootOffset: number;
-  type: string;
-  inversion?: number;
-}
-
-function wrapRoot(root: number): number {
-  return ((root % 12) + 12) % 12;
-}
-
-function getChordBankPalette(type: string): ChordBankPalette {
-  switch (type) {
-    case 'min11':
-      return { major: 'maj9', minor: 'min11' };
-    case 'min9':
-      return { major: 'maj9', minor: 'min9' };
-    case 'min7':
-      return { major: 'maj7', minor: 'min7' };
-    case 'min6':
-      return { major: '6', minor: 'min6' };
-    case 'min':
-      return { major: 'maj', minor: 'min' };
-    case 'maj9':
-    case 'add9':
-      return { major: 'maj9', minor: 'min11' };
-    case 'maj7':
-      return { major: 'maj7', minor: 'min7' };
-    case '6':
-      return { major: '6', minor: 'min6' };
-    case '13':
-      return { major: 'maj9', minor: 'min9' };
-    case '11':
-      return { major: 'maj9', minor: 'min11' };
-    case '9':
-      return { major: 'maj9', minor: 'min9' };
-    case '7':
-      return { major: 'maj7', minor: 'min7' };
-    default:
-      return { major: 'maj', minor: 'min' };
-  }
-}
+const MAJOR_SCALE = [0, 2, 4, 5, 7, 9, 11];
+const NATURAL_MINOR_SCALE = [0, 2, 3, 5, 7, 8, 10];
+const MAJOR_TRIADS = ['maj', 'min', 'min', 'maj', 'maj', 'min', 'dim'];
+const MINOR_TRIADS = ['min', 'dim', 'maj', 'min', 'min', 'maj', 'maj'];
 
 export function buildRelatedChordBank(chord: ChordSpec): ChordSpec[] {
   const current = normalizeChordSpec(chord);
-  const palette = getChordBankPalette(current.type);
+  // A chord alone cannot identify a unique key. Treat its root as the tonic;
+  // minor-family chords use natural minor, and other qualities use major.
   const minorContext = MINOR_TONIC_TYPES.has(current.type);
-  const colorRules: ChordBankRule[] = [
-    { rootOffset: 1, type: 'maj9' },
-    { rootOffset: 2, type: 'min11' },
-    { rootOffset: 3, type: 'min11' },
-    { rootOffset: 10, type: 'min11' },
-    { rootOffset: 10, type: 'maj9' },
-  ];
-  const contextualRules: ChordBankRule[] = minorContext
-    ? [
-        { rootOffset: 5, type: palette.minor },
-        { rootOffset: 7, type: palette.minor },
-      ]
-    : [
-        { rootOffset: 4, type: palette.minor },
-        { rootOffset: 11, type: palette.minor },
-      ];
-  const templates = [
-    { rootOffset: 0, type: current.type },
-    ...colorRules,
-    ...contextualRules,
-  ];
+  const scale = minorContext ? NATURAL_MINOR_SCALE : MAJOR_SCALE;
+  const triads = minorContext ? MINOR_TRIADS : MAJOR_TRIADS;
+  const bank = scale.map((offset, degree) => degree === 0
+    ? { ...current }
+    : { root: (current.root + offset) % 12, type: triads[degree], inversion: 0 });
 
-  return templates.map(({ rootOffset, type, inversion }, index) => normalizeChordSpec({
-    root: wrapRoot(current.root + rootOffset),
-    type,
-    inversion: index === 0 ? current.inversion : inversion ?? 0,
-  }));
+  // Keep the chosen color/voicing on I (or i), and use the eighth hardware pad
+  // as a return to that same tonic rather than adding an unrelated chord.
+  return [...bank, { ...current }];
 }
 
 export function clampInversion(type: string, inversion: number): number {
