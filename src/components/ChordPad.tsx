@@ -383,7 +383,7 @@ export function ChordPad({
           type="button"
           className="ml-auto h-7 border-2 border-black bg-white px-2 font-mono text-[10px] font-black uppercase text-black hover:bg-black hover:text-white"
           onClick={handleBuildChordBank}
-          title="Pads 1–7 follow the root's major scale (natural minor for minor chords). Pads 1 and 8 keep the selected chord."
+          title="Build related chords with matching richness in major or natural minor. Pads 1 and 8 keep the selected chord."
         >
           Build Bank From Current
         </button>
@@ -395,28 +395,34 @@ export function ChordPad({
 
       {chordBank.length > 0 && (
         <div role="group" aria-label="Chord pad assignments" className="grid grid-cols-4 gap-1 sm:grid-cols-8">
-          {chordBank.map((chord, index) => (
-            <button
-              key={index}
-              className={`border-2 border-black px-1 py-1 font-mono text-[11px] font-black ${
-                activeChordKey === chordKey(chord.root, chord.type)
-                  ? 'bg-black text-white'
-                  : 'bg-white text-black hover:bg-black hover:text-white'
-              }`}
-              onClick={() => {
-                if (latched) handleLatchedChordTrigger(chord.root, chord.type, chord.inversion);
-              }}
-              onPointerDown={event => handleChordPointerDown(event, chord.root, chord.type, chord.inversion)}
-              onPointerUp={handleChordPointerEnd}
-              onPointerCancel={handleChordPointerEnd}
-              onKeyDown={event => handleChordKeyDown(event, chord.root, chord.type, chord.inversion)}
-              onKeyUp={handleChordKeyUp}
-              aria-label={`Pad ${index + 1}: ${getChordLabel(chord)}`}
-              aria-pressed={activeChordKey === chordKey(chord.root, chord.type)}
-            >
-              <span className="mr-1 opacity-60">{index + 1}</span>{getChordLabel(chord)}
-            </button>
-          ))}
+          {chordBank.map((chord, index) => {
+            const [name, alterations] = getChordLabel(chord).split('(');
+            return (
+              <button
+                key={index}
+                className={`min-w-0 break-words border-2 border-black px-1 py-1 font-mono text-[11px] font-black ${
+                  activeChordKey === chordKey(chord.root, chord.type)
+                    ? 'bg-black text-white'
+                    : 'bg-white text-black hover:bg-black hover:text-white'
+                }`}
+                onClick={() => {
+                  if (latched) handleLatchedChordTrigger(chord.root, chord.type, chord.inversion);
+                }}
+                onPointerDown={event => handleChordPointerDown(event, chord.root, chord.type, chord.inversion)}
+                onPointerUp={handleChordPointerEnd}
+                onPointerCancel={handleChordPointerEnd}
+                onKeyDown={event => handleChordKeyDown(event, chord.root, chord.type, chord.inversion)}
+                onKeyUp={handleChordKeyUp}
+                aria-label={`Pad ${index + 1}: ${getChordLabel(chord)}`}
+                title={`${NOTE_NAMES[chord.root]} ${CHORD_TYPES[chord.type].label}`}
+                aria-pressed={activeChordKey === chordKey(chord.root, chord.type)}
+              >
+                <span className="block text-[9px] opacity-60">{index + 1}</span>
+                <span className="inline-block">{name}</span>
+                {alterations && <span className="inline-block">({alterations}</span>}
+              </button>
+            );
+          })}
         </div>
       )}
 
