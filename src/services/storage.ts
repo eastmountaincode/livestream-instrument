@@ -22,6 +22,8 @@ export interface HarmonicEvidenceSettings {
 
 export interface StreamSettings {
   filterQ: number;
+  levelMatch: boolean;
+  levelMatchReferenceQ: number;
   volume: number;
   highPassFreq: number;
   lowPassFreq: number;
@@ -157,6 +159,10 @@ function normalizeHarmonicEvidenceSettings(value: unknown): HarmonicEvidenceSett
 function normalizeStreamSettings(settings: Partial<StreamSettings>): StreamSettings {
   return {
     filterQ: typeof settings.filterQ === 'number' && Number.isFinite(settings.filterQ) ? settings.filterQ : 30,
+    levelMatch: settings.levelMatch === true,
+    levelMatchReferenceQ: typeof settings.levelMatchReferenceQ === 'number' && Number.isFinite(settings.levelMatchReferenceQ)
+      ? Math.max(1, Math.min(100, settings.levelMatchReferenceQ))
+      : Math.max(1, Math.min(100, typeof settings.filterQ === 'number' && Number.isFinite(settings.filterQ) ? settings.filterQ : 30)),
     volume: typeof settings.volume === 'number' && Number.isFinite(settings.volume) ? settings.volume : 0.8,
     highPassFreq: typeof settings.highPassFreq === 'number' && Number.isFinite(settings.highPassFreq) ? settings.highPassFreq : DEFAULT_HIGH_PASS_FREQ,
     lowPassFreq: typeof settings.lowPassFreq === 'number' && Number.isFinite(settings.lowPassFreq) ? settings.lowPassFreq : DEFAULT_LOW_PASS_FREQ,

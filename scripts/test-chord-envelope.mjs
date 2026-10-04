@@ -12,7 +12,8 @@ const compile = path => ts.transpileModule(readFileSync(new URL(path, import.met
 }).outputText;
 const output = url(compile('../src/services/audioOutput.ts'));
 const router = url(compile('../src/services/audioOutputRouter.ts').replace('"./audioOutput"', JSON.stringify(output)));
-const { AudioEngine } = await import(url(compile('../src/services/AudioEngine.ts').replace('"./audioOutputRouter"', JSON.stringify(router))));
+const levelMatchModule = url(compile('../src/services/resonanceLevelMatch.ts'));
+const { AudioEngine } = await import(url(compile('../src/services/AudioEngine.ts').replace('"./audioOutputRouter"', JSON.stringify(router)).replace("'./resonanceLevelMatch'", JSON.stringify(levelMatchModule))));
 
 // Render the real engine's note scheduling against a constant source, isolating
 // the envelope from the unpredictable content of a live environmental stream.
@@ -20,7 +21,11 @@ function fixture(tight, toneMode = 'bands') {
   const ctx = new webAudioEngine.RenderingAudioContext({ sampleRate: 48000, blockSize: 128, numberOfChannels: 1 });
   const gain = ctx.createGain();
   gain.gain.value = 0;
-  gain.connect(ctx.destination);
+  const levelMatchGain = ctx.createGain();
+  const streamGain = ctx.createGain();
+  gain.connect(levelMatchGain);
+  levelMatchGain.connect(streamGain);
+  streamGain.connect(ctx.destination);
   const source = ctx.createBufferSource();
   source.buffer = ctx.createBuffer(1, 48000, 48000);
   source.buffer.getChannelData(0).fill(1);
@@ -28,7 +33,7 @@ function fixture(tight, toneMode = 'bands') {
   source.connect(gain);
   source.start();
   const voice = { gain, filter: ctx.createBiquadFilter(), harmonicBands: [], active: false, tight: false, harmonicEvidence: 0 };
-  const channel = { voices: [voice], activeVoices: new Map(), octaveShift: 0, filterQ: 30 };
+  const channel = { highPassFilter: ctx.createBiquadFilter(), lowPassFilter: ctx.createBiquadFilter(), levelMatchGain, streamGain, levelMatch: false, levelMatchReferenceQ: 30, levelMatchPending: false, volume: 1, rawAnalyser: { getFloatFrequencyData: bins => bins.fill(-40) }, analysisBins: new Float32Array(4096), voices: [voice], activeVoices: new Map(), octaveShift: 0, filterQ: 30 };
   const engine = Object.assign(Object.create(AudioEngine.prototype), {
     ctx, channels: new Map([['fixture', channel]]), activeNotes: new Map(),
     chordPadTight: tight, pitchBendSemitones: 0, toneMode,
@@ -126,6 +131,13 @@ try {
   storage.saveMasterVolume(0.5);
   assert.equal(storage.getChordPadTight(), true, 'other preference writes preserve Tight');
   assert.deepEqual(storage.getChordBank(), [{ root: 4, type: 'min11', inversion: 1 }]);
+  storage.saveStreamSettings('fixture', { filterQ: 45, volume: 0.7 });
+  assert.equal(storage.getStreamSettings('fixture').levelMatch, false, 'legacy tracks default off');
+  storage.saveStreamSettings('fixture', { ...storage.getStreamSettings('fixture'), levelMatch: true, levelMatchReferenceQ: 65 });
+  storage.saveMasterVolume(0.4);
+  assert.equal(storage.getStreamSettings('fixture').levelMatch, true);
+  assert.equal(storage.getStreamSettings('fixture').levelMatchReferenceQ, 65);
+  assert.equal(storage.getStreamSettings('fixture').volume, 0.7);
   storage.saveChordPadTight(false);
   assert.equal(storage.getChordPadTight(), false);
 } finally {
@@ -133,3 +145,24 @@ try {
   else globalThis.localStorage = originalStorage;
 }
 console.log('Tight preference checks passed: legacy default, persistence, and other saved controls preserved.');
+
+{
+  const { engine, advance, level } = fixture(true);
+  engine.noteOn(60, 127, 'chord-pad');
+  engine.setStreamLevelMatch('fixture', true, 30);
+  engine.setStreamFilterQ('fixture', 100);
+  advance(0.1);
+  const matched = level();
+  engine.setStreamVolume('fixture', 0.25);
+  advance(0.1);
+  assert.ok(Math.abs(level() / matched - 0.25) < 0.001, 'volume stays independent of Level Match');
+  engine.allNotesOff('chord-pad');
+  engine.updateLevelMatch(engine.channels.get('fixture'));
+  advance(0.025);
+  assert.ok(Math.abs(level()) < 1e-6, 'Level Match must preserve Tight release silence');
+  assert.equal(engine.getStreamLevelMatch('fixture').referenceQ, 30, 'reference survives resonance edits');
+  engine.setStreamLevelMatch('fixture', false);
+  advance(0.2);
+  assert.ok(Math.abs(engine.channels.get('fixture').levelMatchGain.gain.value - 1) < 0.001);
+}
+console.log('Level Match engine checks passed: independent volume, reference stability, bypass, and Tight releases.');

@@ -337,6 +337,8 @@ export function useStreamPlayback({
 
       const nextSettings: StreamSettings = {
         filterQ: savedSettings?.filterQ ?? defaultSettings?.filterQ ?? audioEngine.getStreamFilterQ(source.id),
+        levelMatch: savedSettings?.levelMatch ?? false,
+        levelMatchReferenceQ: savedSettings?.levelMatchReferenceQ ?? savedSettings?.filterQ ?? 30,
         volume: savedSettings?.volume ?? defaultSettings?.volume ?? audioEngine.getStreamVolume(source.id),
         highPassFreq: savedSettings?.highPassFreq ?? defaultSettings?.highPassFreq ?? audioEngine.getStreamHighPass(source.id),
         lowPassFreq: savedSettings?.lowPassFreq ?? defaultSettings?.lowPassFreq ?? audioEngine.getStreamLowPass(source.id),
@@ -345,6 +347,7 @@ export function useStreamPlayback({
         muted: savedSettings?.muted ?? defaultSettings?.muted ?? audioEngine.getStreamMuted(source.id),
       };
       audioEngine.setStreamFilterQ(source.id, nextSettings.filterQ);
+      audioEngine.setStreamLevelMatch(source.id, nextSettings.levelMatch, nextSettings.levelMatchReferenceQ);
       audioEngine.setStreamVolume(source.id, nextSettings.volume);
       audioEngine.setStreamHighPass(source.id, nextSettings.highPassFreq);
       audioEngine.setStreamLowPass(source.id, nextSettings.lowPassFreq);

@@ -1,3 +1,4 @@
+import { estimateResonanceLevelMatch, type ResonanceBand } from './resonanceLevelMatch';
 import { createAudioOutputRouter } from "./audioOutputRouter";
 /**
  * Resonant Filter Instrument Engine
@@ -80,6 +81,7 @@ interface HarmonicBand {
   gain: GainNode;
   connected: boolean;
   connectionToken: number;
+  targetGain: number;
 }
 
 interface Voice {
@@ -110,6 +112,11 @@ function noteToFreq(note: number): number {
 interface StreamChannel {
   source: MediaElementAudioSourceNode;
   streamGain: GainNode;
+  levelMatchGain: GainNode;
+  levelMatch: boolean;
+  levelMatchReferenceQ: number;
+  levelMatchPending: boolean;
+  levelMatchQueued: boolean;
   rawAnalyser: AnalyserNode;
   analysisBins: Float32Array<ArrayBuffer>;
   analysisUpdatedAt: number;
@@ -216,6 +223,8 @@ export class AudioEngine {
     merger.connect(monoOut);
 
     const streamGain = this.ctx.createGain();
+    const levelMatchGain = this.ctx.createGain();
+    levelMatchGain.connect(streamGain);
     const rawAnalyser = this.ctx.createAnalyser();
     rawAnalyser.fftSize = ANALYSIS_FFT_SIZE;
     rawAnalyser.smoothingTimeConstant = 0.55;
@@ -262,7 +271,7 @@ export class AudioEngine {
 
       monoOut.connect(filter);
       filter.connect(gain);
-      gain.connect(streamGain);
+      gain.connect(levelMatchGain);
 
       const harmonicBands: HarmonicBand[] = [];
       for (let harmonic = 2; harmonic <= HARMONIC_EVIDENCE_MAX_HARMONIC; harmonic++) {
@@ -283,6 +292,7 @@ export class AudioEngine {
           gain: harmonicGain,
           connected: false,
           connectionToken: 0,
+          targetGain: 0,
         });
       }
 
@@ -307,6 +317,11 @@ export class AudioEngine {
     this.channels.set(id, {
       source,
       streamGain,
+      levelMatchGain,
+      levelMatch: false,
+      levelMatchReferenceQ: DEFAULT_Q,
+      levelMatchPending: false,
+      levelMatchQueued: false,
       rawAnalyser,
       analysisBins: new Float32Array(rawAnalyser.frequencyBinCount),
       analysisUpdatedAt: Number.NEGATIVE_INFINITY,
@@ -372,6 +387,7 @@ export class AudioEngine {
       }
       try { ch.source.disconnect(); } catch { /* ok */ }
       try { ch.rawAnalyser.disconnect(); } catch { /* ok */ }
+      try { ch.levelMatchGain.disconnect(); } catch { /* ok */ }
       try { ch.streamGain.disconnect(); } catch { /* ok */ }
       try { ch.highPassFilter.disconnect(); } catch { /* ok */ }
       try { ch.lowPassFilter.disconnect(); } catch { /* ok */ }
@@ -772,6 +788,7 @@ export class AudioEngine {
           band.connected = false;
         }, disconnectDelayMs);
       }
+      band.targetGain = bandGain;
       band.gain.gain.setTargetAtTime(bandGain, now, timeConstant);
     }
   }
@@ -831,6 +848,9 @@ export class AudioEngine {
     if (this.analysisTimer !== null || typeof window === 'undefined') return;
     this.analysisTimer = window.setInterval(() => {
       this.updateAnalyzedToneVoices();
+      for (const ch of this.channels.values()) {
+        if (ch.levelMatchPending) this.updateLevelMatch(ch);
+      }
     }, ANALYSIS_TIMER_MS);
   }
 
@@ -843,6 +863,7 @@ export class AudioEngine {
   private retuneActiveVoices(timeConstant = 0.005) {
     const now = this.ctx.currentTime;
     for (const [, ch] of this.channels) {
+      ch.levelMatchPending = ch.levelMatch;
       for (const [note, voice] of ch.activeVoices) {
         voice.targetFrequency = noteToFreq(note + ch.octaveShift * 12 + this.pitchBendSemitones);
         const harmonicEvidenceEnabled = this.toneMode === 'harmonic-evidence';
@@ -903,8 +924,18 @@ export class AudioEngine {
     voice.gain.gain.setTargetAtTime(this.getVoiceOutputGain(voice, velocity), now, voice.tight ? TIGHT_ATTACK : ATTACK);
 
     ch.activeVoices.set(note, voice);
+    ch.levelMatchPending = ch.levelMatch;
     this.updateSpectralSnapVoicesForChannel(ch, 0.04);
     this.updateHarmonicEvidenceVoicesForChannel(ch);
+    if (ch.levelMatch && !ch.levelMatchQueued) {
+      // A pad starts several notes synchronously. Estimate the complete chord
+      // once, instead of spending audio-trigger time on every partial chord.
+      ch.levelMatchQueued = true;
+      queueMicrotask(() => {
+        ch.levelMatchQueued = false;
+        this.updateLevelMatch(ch);
+      });
+    }
   }
 
   noteOn(note: number, velocity: number = 127, source: string = 'default'): boolean {
@@ -1028,6 +1059,7 @@ export class AudioEngine {
     const ch = this.channels.get(id);
     if (!ch) return;
     ch.filterQ = Math.max(1, Math.min(100, q));
+    if (ch.levelMatch) this.updateLevelMatch(ch);
     const now = this.ctx.currentTime;
     for (const voice of ch.voices) {
       voice.filter.Q.setTargetAtTime(ch.filterQ, now, 0.01);
@@ -1035,6 +1067,66 @@ export class AudioEngine {
         band.filter.Q.setTargetAtTime(ch.filterQ, now, 0.01);
       }
     }
+  }
+
+  setStreamLevelMatch(id: string, enabled: boolean, referenceQ?: number) {
+    const ch = this.channels.get(id);
+    if (!ch) return;
+    ch.levelMatch = enabled;
+    ch.levelMatchReferenceQ = typeof referenceQ === 'number' && Number.isFinite(referenceQ)
+      ? Math.max(1, Math.min(100, referenceQ)) : ch.filterQ;
+    ch.levelMatchPending = enabled;
+    if (enabled) {
+      this.startToneAnalysis();
+      this.updateLevelMatch(ch);
+    } else {
+      ch.levelMatchGain.gain.setTargetAtTime(1, this.ctx.currentTime, 0.02);
+      if (this.toneMode === 'bands' && ![...this.channels.values()].some(channel => channel.levelMatch)) {
+        this.stopToneAnalysis();
+      }
+    }
+  }
+
+  getStreamLevelMatch(id: string) {
+    const ch = this.channels.get(id);
+    return { enabled: ch?.levelMatch ?? false, referenceQ: ch?.levelMatchReferenceQ ?? DEFAULT_Q };
+  }
+
+  private updateLevelMatch(ch: StreamChannel) {
+    // Freeze between edits/hits and throughout releases. Never chase an
+    // envelope, muted track, or a stream going silent.
+    if (!ch.levelMatch) return;
+    if (ch.filterQ === ch.levelMatchReferenceQ) {
+      ch.levelMatchGain.gain.setTargetAtTime(1, this.ctx.currentTime, 0.01);
+      ch.levelMatchPending = false;
+      return;
+    }
+    if (!ch.activeVoices.size) return;
+    ch.rawAnalyser.getFloatFrequencyData(ch.analysisBins);
+    const bands: ResonanceBand[] = [];
+    for (const [note, voice] of ch.activeVoices) {
+      const gain = this.getVoiceOutputGain(voice, this.getEffectiveVelocity(note));
+      bands.push({ frequency: voice.snappedFrequency ?? voice.targetFrequency, gain });
+      if (this.toneMode === 'harmonic-evidence') {
+        for (const band of voice.harmonicBands) {
+          if (band.connected) bands.push({ frequency: voice.targetFrequency * band.harmonic, gain: gain * band.targetGain });
+        }
+      }
+    }
+    // Include the track EQ in both estimates; it can remove much of a chord.
+    const spectrum = ch.analysisBins.slice();
+    const frequencies = Float32Array.from(spectrum, (_, i) => i * this.ctx.sampleRate / (spectrum.length * 2));
+    const magnitude = new Float32Array(spectrum.length);
+    const phase = new Float32Array(spectrum.length);
+    for (const filter of [ch.highPassFilter, ch.lowPassFilter]) {
+      filter.getFrequencyResponse(frequencies, magnitude, phase);
+      for (let i = 0; i < spectrum.length; i++) spectrum[i] += 20 * Math.log10(Math.max(1e-12, magnitude[i]));
+    }
+    const correction = estimateResonanceLevelMatch(spectrum, this.ctx.sampleRate,
+      bands, ch.levelMatchReferenceQ, ch.filterQ);
+    if (correction === null) { ch.levelMatchPending = true; return; }
+    ch.levelMatchGain.gain.setTargetAtTime(correction, this.ctx.currentTime, 0.01);
+    ch.levelMatchPending = false;
   }
 
   getStreamFilterQ(id: string): number {
@@ -1156,7 +1248,7 @@ export class AudioEngine {
       ? mode
       : 'bands';
     if (this.toneMode === 'bands') {
-      this.stopToneAnalysis();
+      if (![...this.channels.values()].some(ch => ch.levelMatch)) this.stopToneAnalysis();
     } else {
       this.startToneAnalysis();
     }
