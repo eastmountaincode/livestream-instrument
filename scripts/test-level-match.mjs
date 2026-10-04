@@ -70,18 +70,23 @@ for (const dark of [false, true]) {
     for (let i = 0; i < currentSpectrum.length; i++) currentSpectrum[i] += 20 * Math.log10(Math.max(1e-12, magnitude[i]));
   }
   const baseline = await render(30, 1, dark);
-  for (const q of [1, 5, 10, 60, 100]) {
+  // Low-Q targets deliberately sit below the equal-energy reference after
+  // listening feedback; the mid/high range keeps its original matching.
+  for (const [q, targetDb] of [[1, -3], [5, -0.903], [10, 0], [60, 0], [100, 0]]) {
     const gain = estimate(currentSpectrum, sampleRate, bands, 30, q);
     assert.ok(gain !== null && Number.isFinite(gain));
     const measured = await render(q, gain, dark);
     const differenceDb = 20 * Math.log10(measured / baseline);
     console.log(`${dark ? 'dark' : 'broadband'} Q=${q}: correction ${gain.toFixed(3)}, difference ${differenceDb.toFixed(2)} dB`);
-    assert.ok(Math.abs(differenceDb) < 1.5, 'resonance sweep should stay within 1.5 dB of its reference');
+    assert.ok(Math.abs(differenceDb - targetDb) < 1.5, 'resonance sweep should stay within 1.5 dB of its listening target');
     const quieter = currentSpectrum.map(db => db - 30);
     assert.ok(Math.abs(estimate(quieter, sampleRate, bands, 30, q) - gain) < 1e-5, 'quieter input must not cause more makeup gain');
   }
 }
 assert.equal(estimate(spectrum, sampleRate, bands, 30, 30), 1, 'enabling and returning to reference must be unity');
+assert.equal(estimate(spectrum, sampleRate, bands, 1, 1), 1, 'a minimum-resonance reference must also stay at unity');
+assert.ok(Math.abs(estimate(spectrum, sampleRate, bands, 5, 1)
+  * estimate(spectrum, sampleRate, bands, 1, 5) - 1) < 1e-6, 'low-end adjustment works in both sweep directions');
 assert.equal(estimate(new Float32Array(4096).fill(-Infinity), sampleRate, bands, 30, 100), null, 'silence freezes correction');
 assert.equal(estimate(spectrum, sampleRate, [], 30, 100), null, 'no notes freezes correction');
 assert.ok(estimate(spectrum, sampleRate, bands, 1, 100) <= 8, 'makeup gain is capped');

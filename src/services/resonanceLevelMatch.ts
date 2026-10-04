@@ -7,6 +7,13 @@ export interface ResonanceBand {
   gain: number;
 }
 
+// Listening adjustment: the broadest settings still feel louder after energy
+// matching. Taper an extra 3 dB of attenuation from Q=1 to zero at Q=10.
+// Compare both settings so enabling Level Match never changes its reference.
+function lowResonanceTrimDb(q: number): number {
+  return -3 * Math.max(0, Math.min(1, 1 - Math.log10(q)));
+}
+
 function responsePower(frequency: number, bands: ResonanceBand[], q: number, sampleRate: number): number {
   const w = 2 * Math.PI * frequency / sampleRate;
   const cos = Math.cos(w), sin = Math.sin(w);
@@ -71,6 +78,7 @@ export function estimateResonanceLevelMatch(
     previousFrequency = frequency;
   }
   if (!Number.isFinite(reference) || !Number.isFinite(current) || reference < 1e-12 || current < 1e-12) return null;
+  const listeningCorrection = 10 ** ((lowResonanceTrimDb(currentQ) - lowResonanceTrimDb(referenceQ)) / 20);
   // Limit makeup gain when the selected notes contain little input energy.
-  return Math.min(8, Math.max(1 / 64, Math.sqrt(reference / current)));
+  return Math.min(8, Math.max(1 / 64, Math.sqrt(reference / current) * listeningCorrection));
 }
