@@ -44,9 +44,8 @@ const storage = load('src/services/storage.ts');
 const { buildChordNotes, buildRelatedChordBank } = load('src/music/chords.ts');
 const { ChordPad } = load('src/components/ChordPad.tsx');
 storage.saveChordBank(buildRelatedChordBank({ root: 4, type: 'min11', inversion: 0 }));
-let enabled = true;
-function render() { cursor = 0; pending = []; const tree = ChordPad({ streamConnected: true, inputVolume: 1, midiPadsEnabled: !enabled, midiChordKeysEnabled: enabled }); pending.forEach(fn => fn()); return tree; }
-const send = (note, velocity = 100, status = 0x90) => { midiService.handleMidiMessageEvent({ data: Uint8Array.from([status, note, velocity]), timeStamp: 0 }); return render(); };
+function render() { cursor = 0; pending = []; const tree = ChordPad({ streamConnected: true, inputVolume: 1, midiPadsEnabled: true }); pending.forEach(fn => fn()); return tree; }
+const send = (note, velocity = 100, status = 0x99) => { midiService.handleMidiMessageEvent({ data: Uint8Array.from([status, note, velocity]), timeStamp: 0 }); return render(); };
 const notes = () => [...sounding.keys()].filter(k => k.startsWith('chord-pad:')).map(k => +k.split(':')[1]);
 function findButton(node, label) {
   if (!node || typeof node !== 'object') return null;
@@ -55,25 +54,27 @@ function findButton(node, label) {
   return null;
 }
 midiService.setKeyboardInputEnabled(false);
-midiService.setKeyboardChordMode(true);
+midiService.setKeyboardSelectionMode(true);
 render();
-const keys = [48, 50, 52, 53, 55, 57, 59, 60];
+const keys = [36, 37, 38, 39, 40, 41, 42, 43];
 for (let i = 0; i < keys.length; i++) {
   send(keys[i], 1);
-  assert.deepEqual(notes(), Array.from(buildChordNotes(storage.getChordBank()[i], 3)), `key ${keys[i]} chooses bank slot ${i + 1}`);
-  assert.ok([...sounding.values()].every(v => v === 100), 'soft keys use fixed chord velocity');
+  assert.deepEqual(notes(), Array.from(buildChordNotes(storage.getChordBank()[i], 3)), `pad ${i + 1} chooses bank slot`);
+  assert.ok([...sounding.values()].every(v => v === 100), 'soft pads use fixed chord velocity');
   send(keys[i], 0); assert.ok(notes().length, 'latched chord survives note off');
 }
-assert.equal(rawAttacks, 0, 'no ordinary keyboard notes underneath chord selection');
-const before = notes(); send(49); send(36, 100, 0x99); assert.deepEqual(notes(), before, 'black keys and source pads do not change chord');
-send(60); assert.equal(notes().length, 0, 'latched repeat toggles chord off'); send(60, 0);
-let tree = render(); findButton(tree, 'Latch On').props.onClick(); render();
-send(48); send(50); send(48, 0); assert.ok(notes().length, 'release of older key does not cut new chord');
-send(50, 0); assert.equal(notes().length, 0, 'momentary chord releases');
-send(52); midiService.setKeyboardChordMode(false); enabled = false; render();
-assert.equal(notes().length, 0, 'mode exit releases momentary keyboard chord');
-send(48); assert.equal(notes().length, 0); assert.equal(rawAttacks, 0, 'normal keyboard Off preference restored');
-midiService.setKeyboardInputEnabled(true); send(48); assert.equal(rawAttacks, 1, 'normal keyboard On plays individual notes');
-midiService.setKeyboardChordMode(true); enabled = true; render();
+const before = notes();
+for (let note = 48; note <= 66; note++) { send(note, 100, 0x90); send(note, 0, 0x90); }
+assert.deepEqual(notes(), before, 'all nineteen source keys preserve the current chord');
+assert.equal(rawAttacks, 0, 'source keys never add ordinary keyboard voices');
+send(43); assert.equal(notes().length, 0, 'latched repeat toggles chord off'); send(43, 0);
+findButton(render(), 'Latch On').props.onClick(); render();
+send(36); send(37); send(36, 0); assert.ok(notes().length, 'release of older pad does not cut new chord');
+send(37, 0); assert.equal(notes().length, 0, 'momentary pad releases');
+send(38); midiService.setKeyboardSelectionMode(false); render();
+assert.ok(notes().length, 'leaving Traveler preserves the independent held pad chord'); send(38, 0);
+send(48, 100, 0x90); assert.equal(rawAttacks, 0, 'normal keyboard Off preference restored');
+midiService.setKeyboardInputEnabled(true); send(48, 100, 0x90); assert.equal(rawAttacks, 1, 'normal keyboard On plays individual notes');
+midiService.setKeyboardSelectionMode(true); render();
 assert.ok(![...sounding.keys()].some(k => k.startsWith('midi:')), 'mode entry releases held ordinary notes');
-console.log('Traveler chord-key checks passed: all eight bank assignments, fixed velocity, latch, momentary overlap/release, mode handoff, and no doubled keyboard voice.');
+console.log('Traveler pad/key checks passed: eight pad chords, nineteen independent source keys, fixed velocity, latch, momentary releases, and normal-mode restoration.');

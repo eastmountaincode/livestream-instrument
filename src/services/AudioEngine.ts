@@ -625,7 +625,7 @@ export class AudioEngine {
     ch: StreamChannel,
     timeConstant = 0.05,
   ) {
-    if (this.toneMode !== 'spectral-snap' || ch.activeVoices.size === 0) return;
+    if (!this.shouldAnalyzeChannel(ch) || this.toneMode !== 'spectral-snap' || ch.activeVoices.size === 0) return;
 
     this.refreshSpectralSnapPeaks(ch);
     const voices = Array.from(ch.activeVoices.values());
@@ -795,7 +795,7 @@ export class AudioEngine {
   }
 
   private updateHarmonicEvidenceVoicesForChannel(ch: StreamChannel) {
-    if (this.toneMode !== 'harmonic-evidence' || ch.activeVoices.size === 0) return;
+    if (!this.shouldAnalyzeChannel(ch) || this.toneMode !== 'harmonic-evidence' || ch.activeVoices.size === 0) return;
     if (!this.refreshAnalysisBins(ch)) return;
 
     const now = this.ctx.currentTime;
@@ -1100,6 +1100,10 @@ export class AudioEngine {
     // Freeze between edits/hits and throughout releases. Never chase an
     // envelope, muted track, or a stream going silent.
     if (!ch.levelMatch) return;
+    if (!this.shouldAnalyzeChannel(ch)) {
+      ch.levelMatchPending = true;
+      return;
+    }
     if (ch.filterQ === ch.levelMatchReferenceQ) {
       ch.levelMatchGain.gain.setTargetAtTime(1, this.ctx.currentTime, 0.01);
       ch.levelMatchPending = false;
@@ -1192,11 +1196,22 @@ export class AudioEngine {
   }
 
   // Independent of solo: an unavailable selected destination must mean silence,
-  // never fall back to playing all eight sources.
+  // never fall back to playing every source.
   private travelerSourceId: string | null = null;
 
+  private shouldAnalyzeChannel(ch: StreamChannel): boolean {
+    return this.travelerSourceId == null || this.channels.get(this.travelerSourceId) === ch;
+  }
+
   setTravelerSource(id: string | null) {
+    if (this.travelerSourceId === id) return;
     this.travelerSourceId = id;
+    // Keep every stream and voice warm, but defer expensive spectrum work on
+    // silent destinations. Refresh the destination before opening its gate.
+    this.updateAnalyzedToneVoices();
+    for (const ch of this.channels.values()) {
+      if (this.shouldAnalyzeChannel(ch)) this.updateLevelMatch(ch);
+    }
     this.applyGains();
   }
 

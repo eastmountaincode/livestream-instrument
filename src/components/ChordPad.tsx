@@ -26,8 +26,6 @@ import {
 const CHORD_PAD_SOURCE = 'chord-pad';
 const COMMON_CHORD_TYPES = ['maj', 'min', 'maj7', 'min7', 'min9', 'maj9', 'min11', 'sus4'];
 const MPK_MINI_IV_PAD_NOTES = [36, 37, 38, 39, 40, 41, 42, 43];
-const TRAVELER_CHORD_KEYS = [48, 50, 52, 53, 55, 57, 59, 60];
-const TRAVELER_CHORD_KEY_INDEX = new Map(TRAVELER_CHORD_KEYS.map((note, index) => [note, index]));
 const MPK_MINI_IV_PAD_INDEX = new Map(MPK_MINI_IV_PAD_NOTES.map((note, index) => [note, index]));
 
 const AUTO_CHORD_RETRY_DELAY_MS = 250;
@@ -58,7 +56,6 @@ interface Props {
   inputVolume: number;
   autoPlayDefaultChord?: boolean;
   midiPadsEnabled?: boolean;
-  midiChordKeysEnabled?: boolean;
   onSelectionChange?: (chord: ChordSpec) => void;
   onPerformanceEvent?: (event: ChordPerformanceEvent) => void;
 }
@@ -68,7 +65,6 @@ export function ChordPad({
   inputVolume,
   autoPlayDefaultChord = false,
   midiPadsEnabled = true,
-  midiChordKeysEnabled = false,
   onSelectionChange,
   onPerformanceEvent,
 }: Props) {
@@ -330,8 +326,8 @@ export function ChordPad({
       return;
     }
     if (event.type !== 'on') return;
-    if (event.isPad ? !midiPadsEnabled : !midiChordKeysEnabled) return;
-    const padIndex = (event.isPad ? MPK_MINI_IV_PAD_INDEX : TRAVELER_CHORD_KEY_INDEX).get(event.note);
+    if (!event.isPad || !midiPadsEnabled) return;
+    const padIndex = MPK_MINI_IV_PAD_INDEX.get(event.note);
     if (padIndex === undefined) return;
     if (editPad(padIndex)) return;
     const chord = chordBank[padIndex];
@@ -347,7 +343,7 @@ export function ChordPad({
       return;
     }
 
-  }), [chordBank, editPad, handleLatchedChordTrigger, latched, midiChordKeysEnabled, midiPadsEnabled, releaseAll, startChord]);
+  }), [chordBank, editPad, handleLatchedChordTrigger, latched, midiPadsEnabled, releaseAll, startChord]);
 
   const handleLatchToggle = () => {
     if (latched) {
@@ -484,7 +480,7 @@ export function ChordPad({
                 title={chord ? `${NOTE_NAMES[chord.root]} ${CHORD_TYPES[chord.type].label}` : undefined}
                 aria-pressed={active}
               >
-                <span className="block text-[9px] opacity-60">{index + 1}{midiChordKeysEnabled ? ` · ${["C3", "D3", "E3", "F3", "G3", "A3", "B3", "C4"][index]}` : ""}</span>
+                <span className="block text-[9px] opacity-60">{index + 1}</span>
                 <span>{label}</span>
               </button>
             );

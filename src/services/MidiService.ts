@@ -44,7 +44,7 @@ class MidiService {
   private transportCallbacks: ((event: MidiTransportEvent) => void)[] = [];
   private inputVolume = 1;
   private keyboardInputEnabled = true;
-  private keyboardChordMode = false;
+  private keyboardSelectionMode = false;
   private activeNotes: Map<number, HeldMidiNote> = new Map();
   private handleMidiMessage = (event: Event) => this.handleMidiMessageEvent(event);
   private handleStateChange = () => this.handleMidiStateChange();
@@ -59,7 +59,7 @@ class MidiService {
     this.clockCallbacks ??= [];
     this.transportCallbacks ??= [];
     this.activeNotes ??= new Map();
-    this.keyboardChordMode ??= false;
+    this.keyboardSelectionMode ??= false;
     this.inputVolume = Number.isFinite(this.inputVolume) ? Math.max(0, this.inputVolume) : 1;
     this.keyboardInputEnabled = typeof this.keyboardInputEnabled === 'boolean'
       ? this.keyboardInputEnabled
@@ -145,7 +145,7 @@ class MidiService {
     if (this.keyboardInputEnabled === enabled) return;
     this.keyboardInputEnabled = enabled;
 
-    if (!enabled && !this.keyboardChordMode) {
+    if (!enabled && !this.keyboardSelectionMode) {
       for (const note of this.activeNotes.keys()) {
         this.notifyNote({
           type: 'off',
@@ -162,15 +162,15 @@ class MidiService {
     this.notifyListeners();
   }
 
-  setKeyboardChordMode(enabled: boolean) {
-    if (this.keyboardChordMode === enabled) return;
-    // Release through the old route before switching, including momentary chords.
+  setKeyboardSelectionMode(enabled: boolean) {
+    if (this.keyboardSelectionMode === enabled) return;
+    // Release through the old route before switching, including held keyboard notes.
     for (const note of this.activeNotes.keys()) {
       this.notifyNote({ type: 'off', note, velocity: 0, channel: 1, isPad: false });
     }
     this.activeNotes.clear();
     audioEngine.allNotesOff(MIDI_SOURCE);
-    this.keyboardChordMode = enabled;
+    this.keyboardSelectionMode = enabled;
   }
 
   setInputVolume(volume: number) {
@@ -366,7 +366,7 @@ class MidiService {
       const channel = (status & 0x0F) + 1;
       const isPad = channel === PAD_MIDI_CHANNEL;
       if (velocity > 0) {
-        if (!isPad && (this.keyboardInputEnabled || this.keyboardChordMode)) {
+        if (!isPad && (this.keyboardInputEnabled || this.keyboardSelectionMode)) {
           const held = this.activeNotes.get(note);
           if (held) {
             held.count += 1;
@@ -374,9 +374,9 @@ class MidiService {
           } else {
             this.activeNotes.set(note, { count: 1, velocity });
           }
-          if (!this.keyboardChordMode) audioEngine.noteOn(note, this.scaleVelocity(velocity), MIDI_SOURCE);
+          if (!this.keyboardSelectionMode) audioEngine.noteOn(note, this.scaleVelocity(velocity), MIDI_SOURCE);
         }
-        if (isPad || this.keyboardInputEnabled || this.keyboardChordMode) {
+        if (isPad || this.keyboardInputEnabled || this.keyboardSelectionMode) {
           this.notifyNote({ type: 'on', note, velocity, channel, isPad, inputId, inputName });
         }
       } else {
@@ -416,7 +416,7 @@ class MidiService {
       return;
     }
 
-    if (!this.keyboardInputEnabled && !this.keyboardChordMode) return;
+    if (!this.keyboardInputEnabled && !this.keyboardSelectionMode) return;
 
     const held = this.activeNotes.get(note);
     if (!held) return;
@@ -427,7 +427,7 @@ class MidiService {
       this.activeNotes.delete(note);
     }
 
-    if (!this.keyboardChordMode) audioEngine.noteOff(note, MIDI_SOURCE);
+    if (!this.keyboardSelectionMode) audioEngine.noteOff(note, MIDI_SOURCE);
     this.notifyNote({ type: 'off', note, velocity: 0, channel, isPad, inputId, inputName });
   }
 }

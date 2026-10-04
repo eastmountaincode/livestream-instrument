@@ -1,0 +1,97 @@
+[
+  {
+    "id": "orca-port-townsend",
+    "name": "Orcasound - Port Townsend",
+    "location": "Port Townsend, WA"
+  },
+  {
+    "id": "orca-sunset-bay",
+    "name": "Orcasound - Sunset Bay",
+    "location": "San Juan Island, WA"
+  },
+  {
+    "id": "locus-acra-wave-farm",
+    "name": "Acra - Wave Farm",
+    "location": "Acra, NY"
+  },
+  {
+    "id": "wavefarm-pond-station-daytime",
+    "name": "Wave Farm Pond Station (only during the day)",
+    "location": "Acra, NY"
+  },
+  {
+    "id": "locus-jasper-ridge",
+    "name": "Jasper Ridge Birdcast",
+    "location": "Stanford, CA"
+  },
+  {
+    "id": "locus-india-stream-083",
+    "name": "India - Stream 083",
+    "location": "Kerala, India"
+  },
+  {
+    "id": "locus-yamanakako-cyberforest",
+    "name": "Yamanakako - CyberForest",
+    "location": "Yamanashi, Japan"
+  },
+  {
+    "id": "locus-zalubice-summer-house",
+    "name": "Zalubice Nowe - Summer House",
+    "location": "Zalubice Nowe, Poland"
+  },
+  {
+    "id": "locus-london-greenwich-peninsula",
+    "name": "London - Greenwich Peninsula",
+    "location": "London, UK"
+  },
+  {
+    "id": "locus-r-urban-poplar",
+    "name": "R-Urban - Poplar",
+    "location": "London, UK"
+  },
+  {
+    "id": "locus-blickling-river-bure",
+    "name": "Blickling - River Bure Air",
+    "location": "Norfolk, UK"
+  },
+  {
+    "id": "locus-ortler-glacier",
+    "name": "Ortler - End der Welt Ferner",
+    "location": "Ortler Alps, Italy"
+  },
+  {
+    "id": "locus-jeju-georo",
+    "name": "Jeju - Georo",
+    "location": "Jeju, South Korea"
+  },
+  {
+    "id": "locus-zwolle-langenholte",
+    "name": "Zwolle - Langenholte",
+    "location": "Zwolle, Netherlands"
+  },
+  {
+    "id": "locus-zwolle-nature-reserve-langenholte",
+    "name": "Zwolle - Nature Reserve Langenholte",
+    "location": "Buitenlanden Langenholte, Netherlands"
+  },
+  {
+    "id": "locus-brno-luzanky",
+    "name": "Brno Luzanky",
+    "location": "Brno, Czech Republic"
+  },
+  {
+    "id": "locus-flucc-wien",
+    "name": "Flucc - Wien",
+    "location": "Vienna, Austria"
+  },
+  {
+    "id": "locus-zurich-community-echo",
+    "name": "Zurich - Community Echo",
+    "location": "Zurich, Switzerland"
+  },
+  {
+    "id": "locus-usti-nad-labem-duul",
+    "name": "Usti nad Labem - Duul",
+    "location": "Usti nad Labem, Czech Republic"
+  }
+]

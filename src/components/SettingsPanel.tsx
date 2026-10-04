@@ -59,7 +59,7 @@ export function SettingsPanel({ travelerEnabled, showTravelerPlace, onShowTravel
           className={travelerEnabled || midiKeyboardEnabled ? '!bg-ink !text-paper' : undefined}
           onClick={toggleMidiKeyboard}
         >
-          {travelerEnabled ? 'Chords' : midiKeyboardEnabled ? 'On' : 'Off'}
+          {travelerEnabled ? 'Sources' : midiKeyboardEnabled ? 'On' : 'Off'}
         </UiButton>
       </div>
       <label className="flex items-center gap-2 text-[10px] font-semibold uppercase text-copy">

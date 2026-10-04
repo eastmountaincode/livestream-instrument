@@ -20,7 +20,7 @@ const react = {
     state.push(typeof initial === 'function' ? initial() : initial);
     return [state[index], next => { state[index] = next; }];
   },
-  useRef: current => ({ current }), useCallback: callback => callback,
+  useRef: current => ({ current }), useMemo: fn => fn(), useCallback: callback => callback,
   useEffect: callback => { effects.push(callback); },
 };
 class TestAudioContext extends webAudioEngine.RenderingAudioContext {
@@ -52,7 +52,14 @@ function load(path) {
 const { audioEngine: engine } = load('src/services/AudioEngine.ts');
 const { midiService } = load('src/services/MidiService.ts');
 const storage = load('src/services/storage.ts');
-const { WORLD_TRAVELER_SOURCES: slots } = load('src/music/worldTraveler.ts');
+const { getTravelerSources } = load('src/music/worldTraveler.ts');
+const candidates = JSON.parse(readFileSync(resolve(root, 'scripts/fixtures/traveler-sources.json'), 'utf8'));
+const slots = getTravelerSources(candidates);
+assert.equal(slots.length, 19);
+assert.equal(new Set(slots.map(slot => slot.note)).size, 19);
+assert.equal(slots[0].keyLabel, 'C3');
+assert.equal(slots[18].keyLabel, 'F♯4');
+assert.deepEqual(Array.from(getTravelerSources([...candidates].reverse()), s => s.id), Array.from(slots, s => s.id), 'catalog order cannot reshuffle key assignments');
 const { useWorldTraveler } = load('src/hooks/useWorldTraveler.ts');
 const wanted = new Set(['original', slots[0].id]);
 for (const id of wanted) engine.addStream(id, {});
@@ -66,32 +73,33 @@ const originalNotes = Array.from(engine.activeNotes.keys());
 let connections = [];
 let disconnected = [];
 const control = useWorldTraveler({
-  sources: slots.map(slot => ({ ...slot, name: slot.label })), wantedIds: wanted, activeIds: wanted,
+  sources: candidates, wantedIds: wanted, activeIds: wanted,
   connect: async source => { connections.push(source.id); if (!engine.channels.has(source.id)) engine.addStream(source.id, {}); },
   disconnect: id => { disconnected.push(id); engine.channels.delete(id); },
 });
 const cleanups = effects.map(effect => effect()).filter(Boolean);
 const advance = () => engine.ctx.processTo(engine.ctx.currentTime + .003);
 const gains = () => Array.from(engine.channels, ([id, ch]) => [id, ch.streamGain.gain.value]);
-const send = (note, velocity = 100, status = 0x99) => midiService.handleMidiMessageEvent({ data: Uint8Array.from([status, note, velocity]), timeStamp: 0 });
+const send = (note, velocity = 100, status = 0x90) => midiService.handleMidiMessageEvent({ data: Uint8Array.from([status, note, velocity]), timeStamp: 0 });
 control.toggle();
 assert.equal(state[0], true);
-assert.equal(connections.length, 8, 'connect all fixed destinations');
+assert.equal(connections.length, 19, 'connect all fixed destinations');
 advance();
 for (const [id, value] of gains()) assert.equal(value, id === slots[0].id ? .8 : 0, 'background sources are silent');
-for (let i = 0; i < 8; i++) {
-  send(36 + i, i + 1); advance();
-  assert.equal(state[1], slots[i].id, 'quiet pad hits select the corresponding destination');
+for (let i = 0; i < 19; i++) {
+  send(48 + i, i + 1); advance();
+  assert.equal(state[1], slots[i].id, 'quiet key presses select the corresponding destination');
   for (const [id, value] of gains()) assert.equal(value, id === slots[i].id ? engine.getStreamVolume(id) : 0, 'Tight switches without a fade');
-  send(36 + i, 0); assert.equal(state[1], slots[i].id, 'release keeps destination selected');
+  send(48 + i, 0); assert.equal(state[1], slots[i].id, 'release keeps destination selected');
 }
-assert.deepEqual(Array.from(engine.activeNotes.keys()), originalNotes, 'source switching preserves the held chord');
-send(90); assert.equal(state[1], slots[7].id, 'unassigned pad notes are ignored');
-engine.channels.delete(slots[7].id);
-engine.setTravelerSource(slots[7].id); advance();
+assert.deepEqual(Array.from(engine.activeNotes.keys()), originalNotes, 'source keys do not add ordinary notes or change held chord');
+send(36, 100, 0x99); assert.equal(state[1], slots[18].id, 'chord pads do not select sources');
+send(90); assert.equal(state[1], slots[18].id, 'unassigned key notes are ignored');
+engine.channels.delete(slots[18].id);
+engine.setTravelerSource(slots[18].id); advance();
 assert.ok(gains().every(([, value]) => value === 0), 'missing selected stream never unmutes other streams');
-engine.addStream(slots[7].id, {}); advance();
-assert.ok(engine.channels.get(slots[7].id).streamGain.gain.value > 0, 'reconnecting the same destination resumes it');
+engine.addStream(slots[18].id, {}); advance();
+assert.ok(engine.channels.get(slots[18].id).streamGain.gain.value > 0, 'reconnecting the same destination resumes it');
 engine.setChordPadTight(false);
 control.select(slots[0].id); advance();
 assert.ok(engine.channels.get(slots[0].id).streamGain.gain.value > 0 && engine.channels.get(slots[0].id).streamGain.gain.value < .8, 'soft mode retains gain smoothing');
@@ -106,13 +114,42 @@ assert.equal(state[0], false);
 assert.equal(engine.getStreamSolo(), 'original');
 assert.equal(engine.getStreamPan(slots[0].id), -.3);
 assert.equal(engine.getStreamVolume(slots[0].id), .8);
-assert.equal(disconnected.length, 7, 'only mode-added destinations are disconnected');
+assert.equal(disconnected.length, 18, 'only mode-added destinations are disconnected');
 assert.equal(storage.getStreamSettings(slots[0].id), null, 'temporary settings discarded');
 assert.equal(JSON.parse(saved).masterVolume, .4, 'other intentional preference changes survive');
 assert.deepEqual(JSON.parse(saved).activeStreamIds, ['original', slots[0].id]);
-send(37); assert.equal(state[0], false, 'pad subscription is inert outside the mode');
+send(49); assert.equal(state[0], false, 'key subscription is inert outside the mode');
 connections = []; disconnected = [];
 control.toggle(); control.toggle();
-assert.equal(connections.length, 8); assert.equal(disconnected.length, 7, 'repeated mode transitions are safe');
+assert.equal(connections.length, 19); assert.equal(disconnected.length, 18, 'repeated mode transitions are safe');
+// Spectrum work scales with the audible destination, not the connected count.
+engine.disconnectAllStreams();
+engine.setTravelerSource(slots[0].id);
+engine.setToneMode('harmonic-evidence');
+const spectrumReads = new Map();
+for (const slot of slots) {
+  engine.addStream(slot.id, {});
+  const channel = engine.channels.get(slot.id);
+  channel.rawAnalyser.getFloatFrequencyData = bins => {
+    spectrumReads.set(slot.id, (spectrumReads.get(slot.id) ?? 0) + 1);
+    bins.fill(-55);
+  };
+}
+engine.noteOn(64, 100, 'chord-pad');
+await Promise.resolve();
+spectrumReads.clear();
+engine.setFilterQ(80);
+assert.deepEqual([...spectrumReads.keys()], [slots[0].id], 'resonance analyzes only the selected source');
+for (const slot of slots) assert.equal(engine.getStreamFilterQ(slot.id), 80, 'silent voices keep current resonance');
+spectrumReads.clear();
+engine.setTravelerSource(slots[1].id);
+assert.deepEqual([...spectrumReads.keys()], [slots[1].id], 'destination is analyzed before its gate opens');
+assert.equal(engine.channels.get(slots[1].id).levelMatchPending, false);
+spectrumReads.clear();
+engine.updateAnalyzedToneVoices();
+assert.ok([...spectrumReads.keys()].every(id => id === slots[1].id), 'periodic analysis skips silent destinations');
+spectrumReads.clear();
+engine.setTravelerSource(null);
+assert.equal(spectrumReads.size, 19, 'leaving Traveler restores analysis for every normal track');
 for (const cleanup of cleanups) cleanup();
-console.log('World Traveler checks passed: fixed mappings, all eight connections, tight/soft switching, silent outages, reconnect, held chords, session-only edits, restoration, repeated transitions.');
+console.log('World Traveler checks passed: fixed mappings, all nineteen connections, tight/soft switching, silent outages, reconnect, held chords, session-only edits, restoration, repeated transitions.');

@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { audioEngine } from '../services/AudioEngine';
 import { midiService } from '../services/MidiService';
 import { beginTemporaryStreamSettings, endTemporaryStreamSettings, getStreamSettings, type StreamSettings } from '../services/storage';
 import type { LiveSource } from '../services/streams';
 import type { StreamConnectOptions } from './useStreamPlayback';
-import { WORLD_TRAVELER_SOURCES } from '../music/worldTraveler';
+import { getTravelerSources, type TravelerSource } from '../music/worldTraveler';
 
 interface Props {
   sources: LiveSource[];
@@ -37,11 +37,12 @@ function restoreSettings(id: string, settings: StreamSettings) {
 
 export function useWorldTraveler({ sources, wantedIds, activeIds, connect, disconnect }: Props) {
   const [enabled, setEnabled] = useState(false);
-  const [selectedId, setSelectedId] = useState<string>(WORLD_TRAVELER_SOURCES[0].id);
-  const session = useRef<{ wanted: Set<string>; settings: Map<string, StreamSettings> } | null>(null);
+  const slots = useMemo(() => getTravelerSources(sources), [sources]);
+  const [selectedId, setSelectedId] = useState<string>(slots[0]?.id ?? "");
+  const session = useRef<{ wanted: Set<string>; settings: Map<string, StreamSettings>; slots: TravelerSource[] } | null>(null);
 
   const select = useCallback((id: string) => {
-    if (!session.current || !WORLD_TRAVELER_SOURCES.some(source => source.id === id)) return;
+    if (!session.current || !session.current.slots.some(source => source.id === id)) return;
     audioEngine.setTravelerSource(id);
     setSelectedId(id);
   }, []);
@@ -50,44 +51,45 @@ export function useWorldTraveler({ sources, wantedIds, activeIds, connect, disco
     const previous = session.current;
     if (previous) {
       // Keep the routing gate closed to background tracks until restoration finishes.
-      for (const source of WORLD_TRAVELER_SOURCES) {
+      for (const source of previous.slots) {
         if (!previous.wanted.has(source.id)) disconnect(source.id);
       }
       endTemporaryStreamSettings();
       for (const [id, settings] of previous.settings) restoreSettings(id, settings);
-      midiService.setKeyboardChordMode(false);
+      midiService.setKeyboardSelectionMode(false);
       session.current = null;
       audioEngine.setTravelerSource(null);
       setEnabled(false);
       return;
     }
+    if (slots.length === 0) return;
     const settings = new Map(Array.from(wantedIds, id => [id, activeIds.has(id) ? readSettings(id) : getStreamSettings(id) ?? readSettings(id)]));
-    session.current = { wanted: new Set(wantedIds), settings };
+    session.current = { wanted: new Set(wantedIds), settings, slots };
     beginTemporaryStreamSettings(settings);
-    midiService.setKeyboardChordMode(true);
-    const firstId = WORLD_TRAVELER_SOURCES[0].id;
+    midiService.setKeyboardSelectionMode(true);
+    const firstId = slots[0].id;
     audioEngine.setTravelerSource(firstId);
     setSelectedId(firstId);
     setEnabled(true);
-    for (const slot of WORLD_TRAVELER_SOURCES) {
+    for (const slot of slots) {
       const source = sources.find(candidate => candidate.id === slot.id);
       if (source) void connect(source);
     }
-  }, [activeIds, connect, disconnect, sources, wantedIds]);
+  }, [activeIds, connect, disconnect, slots, sources, wantedIds]);
 
   useEffect(() => midiService.onNote(event => {
-    if (!session.current || !event.isPad || event.type !== 'on') return;
-    const slot = WORLD_TRAVELER_SOURCES[event.note - 36];
+    if (!session.current || event.isPad || event.type !== 'on') return;
+    const slot = session.current.slots.find(source => source.note === event.note);
     if (slot) select(slot.id);
   }), [select]);
 
   useEffect(() => () => {
     if (!session.current) return;
     endTemporaryStreamSettings();
-    midiService.setKeyboardChordMode(false);
+    midiService.setKeyboardSelectionMode(false);
     audioEngine.setTravelerSource(null);
     session.current = null;
   }, []);
 
-  return { enabled, selectedId, select, toggle };
+  return { enabled, selectedId, slots, select, toggle };
 }
