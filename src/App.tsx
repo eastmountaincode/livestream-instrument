@@ -16,7 +16,7 @@ import { useStreamPlayback } from './hooks/useStreamPlayback';
 import { useGlobalResonance } from './hooks/useGlobalResonance';
 import { midiService } from './services/MidiService';
 import { audioEngine } from './services/AudioEngine';
-import { getSavedState, getKeyboardVolume, getChordPadVolume, getChordSequencerState, saveActiveStreams, saveSoloId } from './services/storage';
+import { getSavedState, getKeyboardVolume, getChordPadVolume, getChordSequencerState, saveActiveStreams, saveSoloId, getShowTravelerPlace, saveShowTravelerPlace } from './services/storage';
 import type { StreamSettings } from './services/storage';
 import { fetchAcceptedLiveSources, type LiveSource } from './services/streams';
 import {
@@ -71,6 +71,11 @@ function App() {
   const [started, setStarted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [devModeEnabled, setDevModeEnabled] = useState(false);
+  const [showTravelerPlace, setShowTravelerPlace] = useState(getShowTravelerPlace);
+  const changeShowTravelerPlace = useCallback((show: boolean) => {
+    setShowTravelerPlace(show);
+    saveShowTravelerPlace(show);
+  }, []);
   const [soloId, setSoloId] = useState<string | null>(() => {
     const savedSoloId = savedStateOnLoad?.soloId;
     return savedSoloId && savedStateOnLoad?.activeStreamIds.includes(savedSoloId)
@@ -251,6 +256,11 @@ function App() {
       data-dev-mode={devModeEnabled ? 'on' : 'off'}
     >
       <SourceBackdrop activeIds={activeIds} sources={availableSources} />
+      {traveler.enabled && showTravelerPlace && (
+        <div className="traveler-place-display" aria-live="polite" aria-atomic="true">
+          {WORLD_TRAVELER_SOURCES.find(source => source.id === traveler.selectedId)?.label}
+        </div>
+      )}
 
       <div className="sticky top-0 z-30 border-b border-ink bg-ground">
         <header className="mx-auto grid max-w-[1120px] grid-cols-[auto_minmax(0,1fr)] items-end gap-2 px-4 py-2 md:grid-cols-[auto_minmax(280px,1fr)] md:py-3">
@@ -380,7 +390,10 @@ function App() {
           onToggle={() => togglePanel('settings')}
           keepMounted
         >
-          <SettingsPanel />
+          <SettingsPanel
+            showTravelerPlace={showTravelerPlace}
+            onShowTravelerPlaceChange={changeShowTravelerPlace}
+          />
         </Panel>
       </main>
     </div>

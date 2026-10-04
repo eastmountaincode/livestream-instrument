@@ -68,6 +68,7 @@ interface SavedState {
   midiKeyboardEnabled: boolean;
   chordPadVolume: number;
   chordPadTight: boolean;
+  showTravelerPlace: boolean;
   chordPad: ChordPadState | null;
   chordBank: ChordBank;
   chordSequencer: ChordSequencerState;
@@ -140,6 +141,7 @@ function normalizeSavedState(state: StoredStateInput | null): SavedState {
       ? savedChordPadVolume
       : DEFAULT_CHORD_PAD_VOLUME,
     chordPadTight: state?.chordPadTight === true,
+    showTravelerPlace: state?.showTravelerPlace === true,
     chordPad: savedChordPadState && typeof savedChordPadState === 'object'
       ? normalizeChordPadState(savedChordPadState)
       : null,
@@ -415,5 +417,15 @@ export function getHarmonicEvidenceSettings(): HarmonicEvidenceSettings {
 export function removeStreamSettings(id: string): void {
   const state = getCurrent();
   delete state.streams[id];
+  save(state);
+}
+
+export function getShowTravelerPlace(): boolean {
+  return getCurrent().showTravelerPlace;
+}
+
+export function saveShowTravelerPlace(show: boolean): void {
+  const state = getCurrent();
+  state.showTravelerPlace = show;
   save(state);
 }

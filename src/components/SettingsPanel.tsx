@@ -11,7 +11,12 @@ import {
 import { AudioOutputControl } from './AudioOutputControl';
 import { UiButton } from './ui';
 
-export function SettingsPanel() {
+interface Props {
+  showTravelerPlace: boolean;
+  onShowTravelerPlaceChange: (show: boolean) => void;
+}
+
+export function SettingsPanel({ showTravelerPlace, onShowTravelerPlaceChange }: Props) {
   const [midiKeyboardEnabled, setMidiKeyboardEnabled] = useState(
     () => getMidiKeyboardEnabled(),
   );
@@ -55,6 +60,10 @@ export function SettingsPanel() {
           {midiKeyboardEnabled ? 'On' : 'Off'}
         </UiButton>
       </div>
+      <label className="flex items-center gap-2 text-[10px] font-semibold uppercase text-copy">
+        <input type="checkbox" checked={showTravelerPlace} onChange={event => onShowTravelerPlaceChange(event.target.checked)} />
+        Show place name
+      </label>
       <AudioOutputControl
         choose={audioOutput.choose}
         channel={audioOutput.channel}

@@ -277,3 +277,21 @@ input[type="range"]::-moz-range-track {
 .instrument-ui [role="button"]:active:not([aria-disabled="true"]) {
   transform: translateY(1px);
 }
+
+.traveler-place-display {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 0 2vw;
+  pointer-events: none;
+  font-family: Helvetica, Arial, sans-serif;
+  font-size: clamp(2rem, 16vw, 14rem);
+  font-weight: 700;
+  letter-spacing: -0.055em;
+  line-height: 1;
+  color: var(--color-ink);
+  -webkit-text-stroke: 0.015em var(--color-paper);
+  paint-order: stroke fill;
+}
