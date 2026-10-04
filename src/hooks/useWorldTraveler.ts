@@ -55,6 +55,7 @@ export function useWorldTraveler({ sources, wantedIds, activeIds, connect, disco
       }
       endTemporaryStreamSettings();
       for (const [id, settings] of previous.settings) restoreSettings(id, settings);
+      midiService.setKeyboardChordMode(false);
       session.current = null;
       audioEngine.setTravelerSource(null);
       setEnabled(false);
@@ -63,6 +64,7 @@ export function useWorldTraveler({ sources, wantedIds, activeIds, connect, disco
     const settings = new Map(Array.from(wantedIds, id => [id, activeIds.has(id) ? readSettings(id) : getStreamSettings(id) ?? readSettings(id)]));
     session.current = { wanted: new Set(wantedIds), settings };
     beginTemporaryStreamSettings(settings);
+    midiService.setKeyboardChordMode(true);
     const firstId = WORLD_TRAVELER_SOURCES[0].id;
     audioEngine.setTravelerSource(firstId);
     setSelectedId(firstId);
@@ -82,6 +84,7 @@ export function useWorldTraveler({ sources, wantedIds, activeIds, connect, disco
   useEffect(() => () => {
     if (!session.current) return;
     endTemporaryStreamSettings();
+    midiService.setKeyboardChordMode(false);
     audioEngine.setTravelerSource(null);
     session.current = null;
   }, []);

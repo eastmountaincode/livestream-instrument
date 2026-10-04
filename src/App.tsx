@@ -346,6 +346,7 @@ function App() {
           >
             <ChordPad
               midiPadsEnabled={!traveler.enabled}
+              midiChordKeysEnabled={traveler.enabled}
               streamConnected={streamConnected}
               inputVolume={chordPadVolume}
               autoPlayDefaultChord={shouldStartDemo}
@@ -391,6 +392,7 @@ function App() {
           keepMounted
         >
           <SettingsPanel
+            travelerEnabled={traveler.enabled}
             showTravelerPlace={showTravelerPlace}
             onShowTravelerPlaceChange={changeShowTravelerPlace}
           />

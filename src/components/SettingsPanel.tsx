@@ -12,11 +12,12 @@ import { AudioOutputControl } from './AudioOutputControl';
 import { UiButton } from './ui';
 
 interface Props {
+  travelerEnabled: boolean;
   showTravelerPlace: boolean;
   onShowTravelerPlaceChange: (show: boolean) => void;
 }
 
-export function SettingsPanel({ showTravelerPlace, onShowTravelerPlaceChange }: Props) {
+export function SettingsPanel({ travelerEnabled, showTravelerPlace, onShowTravelerPlaceChange }: Props) {
   const [midiKeyboardEnabled, setMidiKeyboardEnabled] = useState(
     () => getMidiKeyboardEnabled(),
   );
@@ -53,11 +54,12 @@ export function SettingsPanel({ showTravelerPlace, onShowTravelerPlaceChange }: 
       <div className="flex items-center gap-2">
         <span className="text-[10px] font-semibold uppercase text-copy">MPK keys</span>
         <UiButton
-          aria-pressed={midiKeyboardEnabled}
-          className={midiKeyboardEnabled ? '!bg-ink !text-paper' : undefined}
+          aria-pressed={travelerEnabled || midiKeyboardEnabled}
+          disabled={travelerEnabled}
+          className={travelerEnabled || midiKeyboardEnabled ? '!bg-ink !text-paper' : undefined}
           onClick={toggleMidiKeyboard}
         >
-          {midiKeyboardEnabled ? 'On' : 'Off'}
+          {travelerEnabled ? 'Chords' : midiKeyboardEnabled ? 'On' : 'Off'}
         </UiButton>
       </div>
       <label className="flex items-center gap-2 text-[10px] font-semibold uppercase text-copy">
