@@ -21,6 +21,8 @@ export interface HarmonicEvidenceSettings {
 }
 
 export interface StreamSettings {
+  // Legacy snapshot, retained for saved-session and Level Match compatibility.
+  // Playback resonance is controlled exclusively by globalFilterQ.
   filterQ: number;
   levelMatch: boolean;
   levelMatchReferenceQ: number;
@@ -60,6 +62,7 @@ interface SavedState {
   streams: Record<string, StreamSettings>;
   soloId: string | null;
   masterVolume: number;
+  globalFilterQ: number;
   keyboardVolume: number;
   midiKeyboardEnabled: boolean;
   chordPadVolume: number;
@@ -110,10 +113,18 @@ function normalizeSavedState(state: StoredStateInput | null): SavedState {
       normalizeStreamSettings(settings && typeof settings === 'object' ? settings : {}),
     ])
   );
+  // Adopt the first saved active track's resonance when opening an older session.
+  const legacyFilterQ = (Array.isArray(state?.activeStreamIds) ? state.activeStreamIds : [])
+    .map(id => streams[id]?.filterQ)
+    .find(q => typeof q === 'number' && Number.isFinite(q));
+  const globalFilterQ = typeof state?.globalFilterQ === 'number' && Number.isFinite(state.globalFilterQ)
+    ? state.globalFilterQ
+    : legacyFilterQ ?? 30;
 
   return {
     activeStreamIds: Array.isArray(state?.activeStreamIds) ? state.activeStreamIds : [],
     streams,
+    globalFilterQ: Math.max(1, Math.min(100, globalFilterQ)),
     soloId: state?.soloId ?? null,
     masterVolume: typeof savedMasterVolume === 'number' && Number.isFinite(savedMasterVolume)
       ? savedMasterVolume
@@ -280,6 +291,17 @@ export function saveMasterVolume(masterVolume: number): void {
 
 export function getMasterVolume(): number {
   return getCurrent().masterVolume;
+}
+
+export function saveGlobalFilterQ(q: number): void {
+    if (!Number.isFinite(q)) return;
+    const state = getCurrent();
+    state.globalFilterQ = Math.max(1, Math.min(100, q));
+    save(state);
+}
+
+export function getGlobalFilterQ(): number {
+    return getCurrent().globalFilterQ;
 }
 
 export function saveKeyboardVolume(keyboardVolume: number): void {

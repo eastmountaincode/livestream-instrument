@@ -10,6 +10,7 @@ import { MidiPanel } from './components/MidiPanel';
 import { SettingsPanel } from './components/SettingsPanel';
 import { Panel } from './components/ui';
 import { useStreamPlayback } from './hooks/useStreamPlayback';
+import { useGlobalResonance } from './hooks/useGlobalResonance';
 import { midiService } from './services/MidiService';
 import { audioEngine } from './services/AudioEngine';
 import { getSavedState, getKeyboardVolume, getChordPadVolume, getChordSequencerState, saveActiveStreams, saveSoloId } from './services/storage';
@@ -31,13 +32,11 @@ const SOURCE_LOAD_RETRY_DELAY_MS = 700;
 const SHOW_CHORD_SEQUENCER = false;
 const DEFAULT_DEMO_STREAM_SETTINGS: Record<string, Partial<StreamSettings>> = {
   'locus-usti-nad-labem-duul': {
-    filterQ: 46,
     volume: 14.87,
     pan: -0.34,
     octaveShift: 0,
   },
   'locus-jasper-ridge': {
-    filterQ: 65,
     volume: 11.53,
     pan: 0.34,
     octaveShift: 0,
@@ -63,6 +62,7 @@ function wait(ms: number): Promise<void> {
 }
 
 function App() {
+  const { filterQ, updateFilterQ } = useGlobalResonance();
   const [savedStateOnLoad] = useState(() => getSavedState());
   const restoredStreamsRef = useRef(false);
   const [started, setStarted] = useState(false);
@@ -300,6 +300,8 @@ function App() {
           meta={`${activeIds.size} Tracks`}
         >
           <Controls
+            filterQ={filterQ}
+            onFilterQChange={updateFilterQ}
             activeSourceIds={activeIds}
             soloId={soloId}
             onSoloChange={setSoloId}

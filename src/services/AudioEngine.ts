@@ -4,7 +4,7 @@ import { createAudioOutputRouter } from "./audioOutputRouter";
  * Resonant Filter Instrument Engine
  *
  * Each stream gets its own bank of resonant bandpass filters with independent
- * Q (resonance) and volume controls. Notes activate across all streams.
+ * volume controls and shared global Q (resonance). Notes activate across all streams.
  *
  * Signal chain per stream:
  *   audioElement → mono → filter(bandpass, Q) → voiceGain → streamGain → EQ → limiter → masterGain → ...
@@ -150,6 +150,7 @@ export class AudioEngine {
   private outputRouter: ReturnType<typeof createAudioOutputRouter>;
 
   private channels: Map<string, StreamChannel> = new Map();
+  private filterQ = DEFAULT_Q;
   private activeNotes: Map<number, ActiveNoteState> = new Map();
   private externalClock = false;
   private chordPadTight = false;
@@ -264,7 +265,7 @@ export class AudioEngine {
       const filter = this.ctx.createBiquadFilter();
       filter.type = 'bandpass';
       filter.frequency.value = 440;
-      filter.Q.value = DEFAULT_Q;
+      filter.Q.value = this.filterQ;
 
       const gain = this.ctx.createGain();
       gain.gain.value = 0;
@@ -278,7 +279,7 @@ export class AudioEngine {
         const harmonicFilter = this.ctx.createBiquadFilter();
         harmonicFilter.type = 'bandpass';
         harmonicFilter.frequency.value = 440 * harmonic;
-        harmonicFilter.Q.value = DEFAULT_Q;
+        harmonicFilter.Q.value = this.filterQ;
 
         const harmonicGain = this.ctx.createGain();
         harmonicGain.gain.value = 0;
@@ -319,7 +320,7 @@ export class AudioEngine {
       streamGain,
       levelMatchGain,
       levelMatch: true,
-      levelMatchReferenceQ: DEFAULT_Q,
+      levelMatchReferenceQ: this.filterQ,
       levelMatchPending: false,
       levelMatchQueued: false,
       rawAnalyser,
@@ -334,7 +335,7 @@ export class AudioEngine {
       audioElement,
       voices,
       activeVoices: new Map(),
-      filterQ: DEFAULT_Q,
+      filterQ: this.filterQ,
       volume: DEFAULT_VOL,
       highPassFreq: DEFAULT_HIGH_PASS_FREQ,
       lowPassFreq: DEFAULT_LOW_PASS_FREQ,
@@ -1056,6 +1057,7 @@ export class AudioEngine {
   // --- Per-stream controls ---
 
   setStreamFilterQ(id: string, q: number) {
+    if (!Number.isFinite(q)) return;
     const ch = this.channels.get(id);
     if (!ch) return;
     ch.filterQ = Math.max(1, Math.min(100, q));
@@ -1287,18 +1289,18 @@ export class AudioEngine {
     };
   }
 
-  // --- Global controls (kept for backwards compat) ---
+  // --- Global controls ---
 
   setFilterQ(q: number) {
+    if (!Number.isFinite(q)) return;
+    this.filterQ = Math.max(1, Math.min(100, q));
     for (const [id] of this.channels) {
-      this.setStreamFilterQ(id, q);
+      this.setStreamFilterQ(id, this.filterQ);
     }
   }
 
   getFilterQ(): number {
-    // Return first channel's Q or default
-    const first = this.channels.values().next().value;
-    return first ? first.filterQ : DEFAULT_Q;
+    return this.filterQ;
   }
 
   setMasterVolume(vol: number) {

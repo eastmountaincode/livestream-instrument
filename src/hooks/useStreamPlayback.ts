@@ -335,7 +335,7 @@ export function useStreamPlayback({
       const defaultSettings = defaultsRef.current[source.id];
       const shouldSaveDefaults = !savedSettings && !!defaultSettings;
 
-      const filterQ = savedSettings?.filterQ ?? defaultSettings?.filterQ ?? audioEngine.getStreamFilterQ(source.id);
+      const filterQ = audioEngine.getFilterQ();
       const nextSettings: StreamSettings = {
         filterQ,
         levelMatch: savedSettings?.levelMatch ?? true,
@@ -347,7 +347,6 @@ export function useStreamPlayback({
         octaveShift: savedSettings?.octaveShift ?? defaultSettings?.octaveShift ?? audioEngine.getStreamOctave(source.id),
         muted: savedSettings?.muted ?? defaultSettings?.muted ?? audioEngine.getStreamMuted(source.id),
       };
-      audioEngine.setStreamFilterQ(source.id, nextSettings.filterQ);
       audioEngine.setStreamLevelMatch(source.id, nextSettings.levelMatch, nextSettings.levelMatchReferenceQ);
       audioEngine.setStreamVolume(source.id, nextSettings.volume);
       audioEngine.setStreamHighPass(source.id, nextSettings.highPassFreq);

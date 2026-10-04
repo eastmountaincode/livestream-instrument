@@ -18,6 +18,8 @@ import {
 import { formatCategory, formatLocalTime } from '../utils/format';
 
 interface Props {
+  filterQ: number;
+  onFilterQChange: (q: number) => void;
   activeSourceIds: Set<string>;
   soloId: string | null;
   onSoloChange: (id: string | null) => void;
@@ -100,7 +102,6 @@ function StreamControls({
 
   // Load saved settings once and use as initial state
   const [saved] = useState(() => getStreamSettings(id));
-  const [q, setQ] = useState(() => saved?.filterQ ?? audioEngine.getStreamFilterQ(id));
   const [levelMatch, setLevelMatch] = useState(() => saved?.levelMatch ?? audioEngine.getStreamLevelMatch(id).enabled);
   const [vol, setVol] = useState(() => saved?.volume ?? audioEngine.getStreamVolume(id));
   const [highPassFreq, setHighPassFreq] = useState(() => saved?.highPassFreq ?? audioEngine.getStreamHighPass(id));
@@ -113,7 +114,6 @@ function StreamControls({
   useEffect(() => {
     if (initRef.current || !saved) return;
     initRef.current = true;
-    audioEngine.setStreamFilterQ(id, saved.filterQ);
     audioEngine.setStreamLevelMatch(id, saved.levelMatch, saved.levelMatchReferenceQ);
     audioEngine.setStreamVolume(id, saved.volume);
     audioEngine.setStreamHighPass(id, saved.highPassFreq);
@@ -123,9 +123,9 @@ function StreamControls({
     audioEngine.setStreamMuted(id, saved.muted);
   }, [id, saved]);
 
-  const persist = useCallback((overrides: Partial<{ filterQ: number; volume: number; highPassFreq: number; lowPassFreq: number; pan: number; octaveShift: number; muted: boolean }>) => {
+  const persist = useCallback((overrides: Partial<{ volume: number; highPassFreq: number; lowPassFreq: number; pan: number; octaveShift: number; muted: boolean }>) => {
     saveStreamSettings(id, {
-      filterQ: overrides.filterQ ?? q,
+      filterQ: audioEngine.getFilterQ(),
       levelMatch: audioEngine.getStreamLevelMatch(id).enabled,
       levelMatchReferenceQ: audioEngine.getStreamLevelMatch(id).referenceQ,
       volume: overrides.volume ?? audioEngine.getStreamVolume(id),
@@ -135,7 +135,7 @@ function StreamControls({
       octaveShift: overrides.octaveShift ?? oct,
       muted: overrides.muted ?? muted,
     });
-  }, [id, q, highPassFreq, lowPassFreq, pan, oct, muted]);
+  }, [id, highPassFreq, lowPassFreq, pan, oct, muted]);
 
   const displayedVolume = externalVolume ?? vol;
 
@@ -252,25 +252,7 @@ function StreamControls({
         <div className="dev-mode dev-mode-violet w-fit">
           <TrackWaveform id={id} muted={muted} />
         </div>
-        <div className="dev-mode dev-mode-indigo grid min-w-0 grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3 lg:grid-cols-5">
-          <label className="dev-mode dev-mode-violet grid min-w-0 grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-black" title="Filter resonance for played notes">
-            <span className="sc-label text-[11px] font-black uppercase">Resonance</span>
-            <span className="sc-value text-right font-mono text-[11px] font-black text-black">{q.toFixed(0)}</span>
-            <input
-              type="range"
-              min="1"
-              max="100"
-              step="0.5"
-              value={q}
-              className="col-span-2 w-full min-w-0"
-              onChange={e => {
-                const val = parseFloat(e.target.value);
-                setQ(val);
-                audioEngine.setStreamFilterQ(id, val);
-                persist({ filterQ: val });
-              }}
-            />
-          </label>
+        <div className="dev-mode dev-mode-indigo grid min-w-0 grid-cols-2 gap-x-3 gap-y-2 lg:grid-cols-4">
           <label className="dev-mode dev-mode-green grid min-w-0 grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-black" title="Track gain">
             <span className="sc-label text-[11px] font-black uppercase">Volume</span>
             <span className="sc-value text-right font-mono text-[11px] font-black text-black">{formatGain(displayedVolume)}</span>
@@ -354,6 +336,8 @@ function StreamControls({
 }
 
 export function Controls({
+  filterQ,
+  onFilterQChange,
   activeSourceIds,
   soloId,
   onSoloChange,
@@ -455,6 +439,27 @@ export function Controls({
       <div className="dev-mode dev-mode-cyan grid gap-3 pt-3">
         <div className="grid gap-x-6 gap-y-2 sm:grid-cols-[minmax(0,240px)_minmax(0,240px)] sm:justify-between">
           <div className="dev-mode dev-mode-indigo grid w-full max-w-[240px] gap-2">
+            <label
+                className="dev-mode dev-mode-violet grid w-full grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-black"
+                title="Global resonance for every track. Mod wheel: broad at 0, sharp at 1."
+            >
+                <span className="text-[11px] font-black uppercase">Resonance</span>
+                <span className="text-right font-mono text-[11px] font-black text-black">
+                    {((filterQ - 1) / 99).toFixed(2)}
+                </span>
+                <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="any"
+                    value={(filterQ - 1) / 99}
+                    aria-label="Global resonance"
+                    aria-valuetext={`${((filterQ - 1) / 99).toFixed(2)}, ${filterQ.toFixed(1)} Q`}
+                    className="col-span-2 w-full min-w-0"
+                    onChange={e => onFilterQChange(1 + parseFloat(e.target.value) * 99)}
+                />
+                <span className="col-span-2 text-[9px] font-bold uppercase text-muted">Mod wheel · all tracks</span>
+            </label>
             <label className="dev-mode dev-mode-violet grid w-full grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-black">
               <span className="text-[11px] font-black uppercase">Master</span>
               <span className="text-right font-mono text-[11px] font-black text-black">{Math.round(masterVolume * 100)}%</span>
