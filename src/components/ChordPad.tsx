@@ -334,7 +334,7 @@ export function ChordPad({
         handleLatchedChordTrigger(chord.root, chord.type, chord.inversion);
       } else {
         activeMidiPadNoteRef.current = event.note;
-        startChord(chord.root, chord.type, chord.inversion, event.velocity);
+        startChord(chord.root, chord.type, chord.inversion);
       }
       return;
     }
