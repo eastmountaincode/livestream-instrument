@@ -77,4 +77,4 @@ send(48, 100, 0x90); assert.equal(rawAttacks, 0, 'normal keyboard Off preference
 midiService.setKeyboardInputEnabled(true); send(48, 100, 0x90); assert.equal(rawAttacks, 1, 'normal keyboard On plays individual notes');
 midiService.setKeyboardSelectionMode(true); render();
 assert.ok(![...sounding.keys()].some(k => k.startsWith('midi:')), 'mode entry releases held ordinary notes');
-console.log('Traveler pad/key checks passed: eight pad chords, sixteen independent source keys, fixed velocity, latch, momentary releases, and normal-mode restoration.');
+console.log('Traveler pad/key checks passed: eight pad chords, fifteen independent source keys, fixed velocity, latch, momentary releases, and normal-mode restoration.');

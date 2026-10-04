@@ -28,6 +28,7 @@ const PLACE_LABELS: Record<string, string> = {
 const WHITE_KEY_OFFSETS = [0, 2, 4, 5, 7, 9, 11];
 const WHITE_KEY_NAMES = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
 export const TRAVELER_FIRST_NOTE = 48;
+const TRAVELER_SOURCE_LIMIT = 15; // The MPK's white keys, C3 through C5.
 export interface TravelerSource { id: string; label: string; note: number; keyLabel: string }
 
 export function getTravelerSources(sources: LiveSource[]): TravelerSource[] {
@@ -37,7 +38,7 @@ export function getTravelerSources(sources: LiveSource[]): TravelerSource[] {
     ...WORLD_TRAVELER_SOURCES.flatMap(slot => byId.has(slot.id) ? [byId.get(slot.id)!] : []),
     ...sources.filter(source => !originals.has(source.id)).sort((a, b) => a.id.localeCompare(b.id)),
   ];
-  return ordered.map((source, index) => {
+  return ordered.slice(0, TRAVELER_SOURCE_LIMIT).map((source, index) => {
     const keyIndex = index % WHITE_KEY_OFFSETS.length;
     const note = TRAVELER_FIRST_NOTE + Math.floor(index / WHITE_KEY_OFFSETS.length) * 12 + WHITE_KEY_OFFSETS[keyIndex];
     return {
