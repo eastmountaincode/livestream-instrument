@@ -9,7 +9,7 @@ const source = readFileSync(new URL('../src/music/chords.ts', import.meta.url), 
 const { outputText } = ts.transpileModule(source, {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
 });
-const { buildRelatedChordBank, buildChordNotes, getChordLabel, normalizeChordSpec, CHORD_TYPES } = await import(
+const { buildRelatedChordBank, buildChordNotes, getChordLabel, normalizeChordSpec, setChordBankPad, PAD_DISPLAY_ORDER, CHORD_TYPES } = await import(
   `data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`
 );
 
@@ -52,3 +52,16 @@ for (const type of Object.keys(CHORD_TYPES)) {
   assert.deepEqual(buildRelatedChordBank(chord)[0], chord);
 }
 console.log('Chord bank checks passed: original palettes, minor fourth/fifth relationships in every key, and saved-chord compatibility.');
+
+const originalBank = buildRelatedChordBank({ root: 4, type: 'min11', inversion: 0 });
+const custom = setChordBankPad(originalBank, 5, { root: 9, type: 'min9', inversion: 2 });
+assert.equal(getChordLabel(custom[5]), 'Am9');
+assert.equal(custom[5].inversion, 2);
+assert.deepEqual(custom.filter((_, i) => i !== 5), originalBank.filter((_, i) => i !== 5));
+const cleared = setChordBankPad(custom, 2, null);
+assert.equal(cleared.length, 8);
+assert.equal(cleared[2], null);
+assert.deepEqual(cleared[5], custom[5], 'clearing a pad never shifts other MIDI assignments');
+assert.deepEqual(PAD_DISPLAY_ORDER.map(i => i + 1), [5, 6, 7, 8, 1, 2, 3, 4]);
+assert.equal(setChordBankPad(originalBank, 8, null), originalBank);
+console.log('Custom pad checks passed: assignment, inversion, stable slot numbers, and MPK display order.');

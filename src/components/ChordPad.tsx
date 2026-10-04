@@ -14,6 +14,8 @@ import {
   DEFAULT_CHORD_VELOCITY,
   getChordLabel,
   NOTE_NAMES,
+  PAD_DISPLAY_ORDER,
+  setChordBankPad,
   normalizeChordSpec,
   ROOT_NOTES,
   scaleChordVelocity,
@@ -67,6 +69,7 @@ export function ChordPad({
   const octave = 3; // Base octave 3 (C3 = MIDI 48)
   const [initialChordPadState] = useState(() => getInitialChordPadState());
   const [chordBank, setChordBank] = useState(() => getChordBank());
+  const [padEditMode, setPadEditMode] = useState<'assign' | 'clear' | null>(null);
   const [selectedRoot, setSelectedRoot] = useState(() => initialChordPadState?.selectedRoot ?? DEFAULT_CHORD.root);
   const [selectedType, setSelectedType] = useState(() => initialChordPadState?.selectedType ?? DEFAULT_CHORD.type);
   const [latched, setLatched] = useState(true);
@@ -85,6 +88,7 @@ export function ChordPad({
   const performanceEventIdRef = useRef(0);
   const performanceChordRef = useRef<ChordSpec | null>(null);
   const activeMidiPadNoteRef = useRef<number | null>(null);
+  const activeScreenPadRef = useRef<number | null>(null);
 
   const rememberChordState = useCallback((root: number, type: string, inv: number, active: boolean) => {
     if (!CHORD_TYPES[type]) return;
@@ -158,6 +162,7 @@ export function ChordPad({
     audioEngine.allNotesOff(CHORD_PAD_SOURCE);
     prevNotes.current = [];
     activeMidiPadNoteRef.current = null;
+    activeScreenPadRef.current = null;
     autoChordPlayedRef.current = true;
     setChordActivity(
       activeChord?.root ?? selectedRoot,
@@ -290,10 +295,37 @@ export function ChordPad({
     releaseAll();
   };
 
+  const editPad = useCallback((index: number) => {
+    if (!padEditMode) return false;
+    const chord = padEditMode === 'assign'
+      ? { root: selectedRoot, type: selectedType, inversion } : null;
+    const nextBank = setChordBankPad(chordBank, index, chord);
+    setChordBank(nextBank);
+    saveChordBank(nextBank);
+    setPadEditMode(null);
+    return true;
+  }, [chordBank, inversion, padEditMode, selectedRoot, selectedType]);
+
+  useEffect(() => {
+    if (!padEditMode) return;
+    const cancelEdit = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPadEditMode(null);
+    };
+    window.addEventListener('keydown', cancelEdit);
+    return () => window.removeEventListener('keydown', cancelEdit);
+  }, [padEditMode]);
+
   useEffect(() => midiService.onNote(event => {
     if (!event.isPad) return;
     const padIndex = MPK_MINI_IV_PAD_INDEX.get(event.note);
     if (padIndex === undefined) return;
+    if (event.type === 'on' && editPad(padIndex)) return;
+    // A cleared/reassigned slot must not swallow the release of a held pad.
+    if (event.type === 'off' && !latched && activeMidiPadNoteRef.current === event.note) {
+      activeMidiPadNoteRef.current = null;
+      releaseAll();
+      return;
+    }
     const chord = chordBank[padIndex];
     if (!chord) return;
 
@@ -307,11 +339,7 @@ export function ChordPad({
       return;
     }
 
-    if (!latched && activeMidiPadNoteRef.current === event.note) {
-      activeMidiPadNoteRef.current = null;
-      releaseAll();
-    }
-  }), [chordBank, handleLatchedChordTrigger, latched, releaseAll, startChord]);
+  }), [chordBank, editPad, handleLatchedChordTrigger, latched, releaseAll, startChord]);
 
   const handleLatchToggle = () => {
     if (latched) {
@@ -326,10 +354,11 @@ export function ChordPad({
   const chordLabel = getChordLabel({ root: selectedRoot, type: selectedType, inversion });
   const maxInversion = (CHORD_TYPES[selectedType]?.intervals.length || 3) - 1;
   const bankChordsByKey = useMemo(
-    () => new Map(chordBank.map(chord => [chordKey(chord.root, chord.type), chord])),
+    () => new Map(chordBank.filter((chord): chord is ChordSpec => chord !== null).map(chord => [chordKey(chord.root, chord.type), chord])),
     [chordBank],
   );
   const handleBuildChordBank = () => {
+    setPadEditMode(null);
     const nextBank = buildRelatedChordBank({ root: selectedRoot, type: selectedType, inversion });
     setChordBank(nextBank);
     saveChordBank(nextBank);
@@ -410,38 +439,63 @@ export function ChordPad({
         >Release</button>
       </div>
 
-      {chordBank.length > 0 && (
-        <div role="group" aria-label="Chord pad assignments" className="grid grid-cols-4 gap-1 sm:grid-cols-8">
-          {chordBank.map((chord, index) => {
-            const [name, alterations] = getChordLabel(chord).split('(');
+      <div className="flex flex-wrap items-center gap-3">
+        <div role="group" aria-label="Chord pad assignments" className="grid w-[280px] max-w-full shrink-0 auto-rows-[44px] grid-cols-4 gap-1">
+          {PAD_DISPLAY_ORDER.map(index => {
+            const chord = chordBank[index];
+            const label = chord ? getChordLabel(chord) : '—';
+            const active = !!chord && activeChordKey === chordKey(chord.root, chord.type);
             return (
               <button
                 key={index}
-                className={`min-w-0 break-words border-2 border-black px-1 py-1 font-mono text-[11px] font-black ${
-                  activeChordKey === chordKey(chord.root, chord.type)
-                    ? 'bg-black text-white'
-                    : 'bg-white text-black hover:bg-black hover:text-white'
+                type="button"
+                disabled={!chord && !padEditMode}
+                className={`min-w-0 break-words border-2 border-black px-1 py-1 font-mono text-[10px] font-black leading-tight ${
+                  active ? 'bg-black text-white' : 'bg-white text-black hover:bg-black hover:text-white'
                 }`}
                 onClick={() => {
-                  if (latched) handleLatchedChordTrigger(chord.root, chord.type, chord.inversion);
+                  if (editPad(index)) return;
+                  if (latched && chord) handleLatchedChordTrigger(chord.root, chord.type, chord.inversion);
                 }}
-                onPointerDown={event => handleChordPointerDown(event, chord.root, chord.type, chord.inversion)}
-                onPointerUp={handleChordPointerEnd}
-                onPointerCancel={handleChordPointerEnd}
-                onKeyDown={event => handleChordKeyDown(event, chord.root, chord.type, chord.inversion)}
-                onKeyUp={handleChordKeyUp}
-                aria-label={`Pad ${index + 1}: ${getChordLabel(chord)}`}
-                title={`${NOTE_NAMES[chord.root]} ${CHORD_TYPES[chord.type].label}`}
-                aria-pressed={activeChordKey === chordKey(chord.root, chord.type)}
+                onPointerDown={event => {
+                  if (!padEditMode && chord && !latched && event.button === 0) {
+                    activeScreenPadRef.current = index;
+                    handleChordPointerDown(event, chord.root, chord.type, chord.inversion);
+                  }
+                }}
+                onPointerUp={event => { if (activeScreenPadRef.current === index) handleChordPointerEnd(event); }}
+                onPointerCancel={event => { if (activeScreenPadRef.current === index) handleChordPointerEnd(event); }}
+                onKeyDown={event => {
+                  if (!padEditMode && chord && !latched && !event.repeat && isChordTriggerKey(event.key)) {
+                    activeScreenPadRef.current = index;
+                    handleChordKeyDown(event, chord.root, chord.type, chord.inversion);
+                  }
+                }}
+                onKeyUp={event => { if (activeScreenPadRef.current === index) handleChordKeyUp(event); }}
+                aria-label={`Pad ${index + 1}: ${chord ? label : 'Empty'}`}
+                title={chord ? `${NOTE_NAMES[chord.root]} ${CHORD_TYPES[chord.type].label}` : undefined}
+                aria-pressed={active}
               >
                 <span className="block text-[9px] opacity-60">{index + 1}</span>
-                <span className="inline-block">{name}</span>
-                {alterations && <span className="inline-block">({alterations}</span>}
+                <span>{label}</span>
               </button>
             );
           })}
         </div>
-      )}
+        <div className="flex items-center gap-1">
+          {(['assign', 'clear'] as const).map(mode => (
+            <button
+              key={mode}
+              type="button"
+              className={`h-7 border-2 border-black px-2 font-mono text-[10px] font-black uppercase ${padEditMode === mode ? 'bg-black text-white' : 'bg-white text-black hover:bg-black hover:text-white'}`}
+              aria-pressed={padEditMode === mode}
+              onClick={() => setPadEditMode(current => current === mode ? null : mode)}
+            >
+              {mode === 'assign' ? 'Assign' : 'Clear'}
+            </button>
+          ))}
+        </div>
+      </div>
 
       {/* Root+chord grid: all 12 roots as rows, common chords as columns */}
       <div className="overflow-x-auto border-2 border-black">

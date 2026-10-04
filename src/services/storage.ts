@@ -1,4 +1,4 @@
-import { DEFAULT_CHORD_VELOCITY, normalizeChordSpec, type ChordSpec } from '../music/chords';
+import { DEFAULT_CHORD_VELOCITY, normalizeChordSpec, type ChordSpec, type ChordBank } from '../music/chords';
 
 const STORAGE_KEY = 'resonator-state';
 export const MAX_STREAM_VOLUME = 4;
@@ -69,7 +69,7 @@ interface SavedState {
   chordPadVolume: number;
   chordPadTight: boolean;
   chordPad: ChordPadState | null;
-  chordBank: ChordSpec[];
+  chordBank: ChordBank;
   chordSequencer: ChordSequencerState;
   toneMode: ToneMode;
   harmonicEvidenceSettings: HarmonicEvidenceSettings;
@@ -204,13 +204,12 @@ function normalizeChordPadState(state: Partial<ChordPadState>): ChordPadState {
   };
 }
 
-function normalizeChordBank(value: unknown): ChordSpec[] {
+function normalizeChordBank(value: unknown): ChordBank {
   if (!Array.isArray(value)) return [];
 
   return value
-    .filter((chord): chord is Partial<ChordSpec> => Boolean(chord) && typeof chord === 'object')
     .slice(0, 8)
-    .map(chord => normalizeChordSpec(chord));
+    .map(chord => chord && typeof chord === 'object' ? normalizeChordSpec(chord) : null);
 }
 
 function normalizeChordSequenceEvent(value: unknown): ChordSequenceEvent | null {
@@ -356,13 +355,13 @@ export function getChordPadState(): ChordPadState | null {
   return getCurrent().chordPad;
 }
 
-export function saveChordBank(chordBank: ChordSpec[]): void {
+export function saveChordBank(chordBank: ChordBank): void {
   const state = getCurrent();
   state.chordBank = normalizeChordBank(chordBank);
   save(state);
 }
 
-export function getChordBank(): ChordSpec[] {
+export function getChordBank(): ChordBank {
   return getCurrent().chordBank;
 }
 

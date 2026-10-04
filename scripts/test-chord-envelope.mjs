@@ -145,6 +145,10 @@ try {
   assert.equal(storage.getStreamSettings('fixture').volume, 4, 'old high gains fit the new slider range');
   storage.saveStreamSettings('fixture', { ...storage.getStreamSettings('fixture'), volume: 0 });
   assert.equal(storage.getStreamSettings('fixture').volume, 0, 'track gain can still reach silence');
+  const partialBank = [null, { root: 9, type: 'min9', inversion: 2 }, null, { root: 4, type: 'min11', inversion: 0 }];
+  storage.saveChordBank(partialBank);
+  storage.saveMasterVolume(0.4);
+  assert.deepEqual(storage.getChordBank(), partialBank, 'empty pads retain their slots across storage writes');
   storage.saveChordPadTight(false);
   assert.equal(storage.getChordPadTight(), false);
 } finally {

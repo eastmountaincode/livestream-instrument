@@ -10,6 +10,16 @@ export interface ChordSpec {
   inversion: number;
 }
 
+export type ChordBank = (ChordSpec | null)[];
+export const PAD_DISPLAY_ORDER = [4, 5, 6, 7, 0, 1, 2, 3] as const;
+
+export function setChordBankPad(bank: ChordBank, index: number, chord: ChordSpec | null): ChordBank {
+  if (!Number.isInteger(index) || index < 0 || index >= 8) return bank;
+  const next = Array.from({ length: 8 }, (_, i) => bank[i] ?? null);
+  next[index] = chord ? normalizeChordSpec(chord) : null;
+  return next;
+}
+
 export interface ChordPerformanceEvent {
   id: number;
   type: 'start' | 'end';
