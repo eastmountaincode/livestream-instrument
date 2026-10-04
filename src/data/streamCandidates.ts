@@ -256,8 +256,8 @@ export const STREAM_CANDIDATE_SEEDS: StreamCandidate[] = ([
     pageUrl: 'https://locusonus.org/soundmap/',
     format: 'MP3 Icecast',
     source: 'Locus Sonus / CreaCast',
-    status: 'accepted',
-    notes: 'Locus Sonus soundmap mount point for Palestine - Al Hara.',
+    status: 'rejected',
+    notes: 'Removed from live sources on 2026-10-04: stream unavailable.',
   },
   {
     id: 'locus-india-stream-083',

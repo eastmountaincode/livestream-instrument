@@ -132,7 +132,7 @@ export function StreamSelector({
                     >
                       <span className="min-w-0 truncate leading-none">{source.name}</span>
                       <span className="flex h-full shrink-0 items-center gap-1 overflow-hidden">
-                        {loading && <LoadingSpinner label={`${source.name}: Loading`} />}
+                        {loading && <LoadingSpinner label={`${source.name}: Loading`} className={localTime ? 'mr-2' : ''} />}
                         {actionLabel && (
                           <span className={looksLive ? 'inline-flex h-5 items-center whitespace-nowrap border border-paper px-1.5 text-[9px] leading-none text-paper' : 'inline-flex h-5 items-center whitespace-nowrap border border-ink bg-paper px-1.5 text-[9px] leading-none text-copy'}>
                             {actionLabel}
