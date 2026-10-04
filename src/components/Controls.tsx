@@ -252,7 +252,7 @@ function StreamControls({
         <div className="dev-mode dev-mode-violet w-fit">
           <TrackWaveform id={id} muted={muted} />
         </div>
-        <div className="dev-mode dev-mode-indigo grid min-w-0 grid-cols-2 gap-x-3 gap-y-2 lg:grid-cols-4">
+        <div className="dev-mode dev-mode-indigo grid min-w-0 grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3 lg:grid-cols-5">
           <label className="dev-mode dev-mode-green grid min-w-0 grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-black" title="Track gain">
             <span className="sc-label text-[11px] font-black uppercase">Volume</span>
             <span className="sc-value text-right font-mono text-[11px] font-black text-black">{formatGain(displayedVolume)}</span>

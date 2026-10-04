@@ -234,9 +234,6 @@ function App() {
         >
           {loading ? 'Connecting...' : hasSavedStreams ? 'Resume Session' : 'Start'}
         </button>
-        {hasSavedStreams > 0 && !loading && (
-          <p className="text-[11px] font-semibold uppercase text-muted-strong">{hasSavedStreams} saved source{hasSavedStreams > 1 ? 's' : ''} will reconnect</p>
-        )}
       </div>
     );
   }
