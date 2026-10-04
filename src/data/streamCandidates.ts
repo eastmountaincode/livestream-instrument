@@ -172,8 +172,8 @@ export const STREAM_CANDIDATE_SEEDS: StreamCandidate[] = ([
     pageUrl: 'https://wavefarm.org/listen/pondstation',
     format: 'MP3 Icecast',
     source: 'Wave Farm Transmission Arts',
-    status: 'accepted',
-    notes: 'Sonic platform for monitoring the hidden activity of a freshwater pond. Credits: Zach Poff and Wave Farm Transmission Arts.',
+    status: 'rejected',
+    notes: 'Inactive for performance: only available during the day. Sonic platform for monitoring the hidden activity of a freshwater pond. Credits: Zach Poff and Wave Farm Transmission Arts.',
   },
   {
     id: 'earthcam-times-square-street',
