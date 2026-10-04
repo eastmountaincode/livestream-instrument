@@ -23,6 +23,10 @@ const DEFAULT_HIGH_PASS_FREQ = 20;
 const DEFAULT_LOW_PASS_FREQ = 20000;
 const ATTACK = 0.02;
 const RELEASE = 0.3;
+// Exponential time constants: ~5 ms to full level, then silent within 20 ms.
+const TIGHT_ATTACK = 0.001;
+const TIGHT_RELEASE = 0.003;
+const TIGHT_RELEASE_END = 0.02;
 const FADE_TIME = 0.5;
 const VOICE_GAIN_BOOST = 8.0;
 const TRACK_LIMITER_THRESHOLD_DB = -10;
@@ -79,6 +83,7 @@ interface HarmonicBand {
 }
 
 interface Voice {
+  tight: boolean;
   note: number;
   filter: BiquadFilterNode;
   gain: GainNode;
@@ -140,6 +145,7 @@ export class AudioEngine {
   private channels: Map<string, StreamChannel> = new Map();
   private activeNotes: Map<number, ActiveNoteState> = new Map();
   private externalClock = false;
+  private chordPadTight = false;
   private pitchBendSemitones = 0;
   private toneMode: ToneMode = 'harmonic-evidence';
   private harmonicEvidenceAmount = 1;
@@ -281,6 +287,7 @@ export class AudioEngine {
       }
 
       voices.push({
+        tight: false,
         note: -1,
         filter,
         gain,
@@ -438,6 +445,19 @@ export class AudioEngine {
     return maxVelocity;
   }
 
+  setChordPadTight(enabled: boolean) {
+    this.chordPadTight = enabled;
+    for (const ch of this.channels.values()) {
+      for (const [note, voice] of ch.activeVoices) {
+        voice.tight = this.isTightNote(note);
+      }
+    }
+  }
+
+  private isTightNote(note: number): boolean {
+    return this.chordPadTight && Boolean(this.activeNotes.get(note)?.sources.has('chord-pad'));
+  }
+
   private refreshNoteGain(note: number) {
     const now = this.ctx.currentTime;
     const velocity = this.getEffectiveVelocity(note);
@@ -445,8 +465,9 @@ export class AudioEngine {
     for (const [, ch] of this.channels) {
       const voice = ch.activeVoices.get(note);
       if (!voice) continue;
+      voice.tight = this.isTightNote(note);
       voice.gain.gain.cancelScheduledValues(now);
-      voice.gain.gain.setTargetAtTime(this.getVoiceOutputGain(voice, velocity), now, ATTACK);
+      voice.gain.gain.setTargetAtTime(this.getVoiceOutputGain(voice, velocity), now, voice.tight ? TIGHT_ATTACK : ATTACK);
     }
   }
 
@@ -765,19 +786,19 @@ export class AudioEngine {
       const measurement = this.measureHarmonicEvidence(ch, voice.targetFrequency);
       voice.harmonicEvidence += (
         measurement.score - voice.harmonicEvidence
-      ) * response.smoothing;
+      ) * (voice.tight ? 1 : response.smoothing);
       this.configureHarmonicBands(
         voice,
         true,
         measurement.strengths,
-        response.bandTimeConstant,
+        voice.tight ? TIGHT_ATTACK : response.bandTimeConstant,
       );
 
       voice.gain.gain.cancelScheduledValues(now);
       voice.gain.gain.setTargetAtTime(
         this.getVoiceOutputGain(voice, this.getEffectiveVelocity(note)),
         now,
-        response.gainTimeConstant,
+        voice.tight ? TIGHT_ATTACK : response.gainTimeConstant,
       );
     }
   }
@@ -839,7 +860,7 @@ export class AudioEngine {
         voice.gain.gain.setTargetAtTime(
           this.getVoiceOutputGain(voice, this.getEffectiveVelocity(note)),
           now,
-          0.04,
+          voice.tight ? TIGHT_ATTACK : 0.04,
         );
       }
     }
@@ -867,6 +888,7 @@ export class AudioEngine {
     const now = this.ctx.currentTime;
 
     voice.note = note;
+    voice.tight = this.isTightNote(note);
     voice.active = true;
     voice.targetFrequency = targetFrequency;
     voice.snappedFrequency = null;
@@ -878,7 +900,7 @@ export class AudioEngine {
     }
     this.configureHarmonicBands(voice, this.toneMode === 'harmonic-evidence', null, 0.001);
     voice.gain.gain.cancelScheduledValues(now);
-    voice.gain.gain.setTargetAtTime(this.getVoiceOutputGain(voice, velocity), now, ATTACK);
+    voice.gain.gain.setTargetAtTime(this.getVoiceOutputGain(voice, velocity), now, voice.tight ? TIGHT_ATTACK : ATTACK);
 
     ch.activeVoices.set(note, voice);
     this.updateSpectralSnapVoicesForChannel(ch, 0.04);
@@ -921,13 +943,15 @@ export class AudioEngine {
 
     const now = this.ctx.currentTime;
     voice.gain.gain.cancelScheduledValues(now);
-    voice.gain.gain.setTargetAtTime(0, now, RELEASE);
+    const release = voice.tight ? TIGHT_RELEASE : RELEASE;
+    voice.gain.gain.setTargetAtTime(0, now, release);
+    if (voice.tight) voice.gain.gain.setValueAtTime(0, now + TIGHT_RELEASE_END);
     voice.active = false;
     voice.note = -1;
     voice.targetFrequency = 440;
     voice.snappedFrequency = null;
     voice.harmonicEvidence = 0;
-    this.configureHarmonicBands(voice, false, null, RELEASE);
+    this.configureHarmonicBands(voice, false, null, release);
     ch.activeVoices.delete(note);
     this.updateSpectralSnapVoicesForChannel(ch, 0.05);
   }

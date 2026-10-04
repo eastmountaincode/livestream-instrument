@@ -3,7 +3,7 @@ import { Minus, Plus } from 'lucide-react';
 import { audioEngine } from '../services/AudioEngine';
 import { midiService } from '../services/MidiService';
 import { webrtcService } from '../services/WebRTCService';
-import { getChordBank, getChordPadState, saveChordBank, saveChordPadState, type ChordPadState } from '../services/storage';
+import { getChordBank, getChordPadState, getChordPadTight, saveChordPadTight, saveChordBank, saveChordPadState, type ChordPadState } from '../services/storage';
 import {
   buildRelatedChordBank,
   buildChordNotes,
@@ -71,6 +71,11 @@ export function ChordPad({
   const [selectedRoot, setSelectedRoot] = useState(() => initialChordPadState?.selectedRoot ?? DEFAULT_CHORD.root);
   const [selectedType, setSelectedType] = useState(() => initialChordPadState?.selectedType ?? DEFAULT_CHORD.type);
   const [latched, setLatched] = useState(true);
+  const [tight, setTight] = useState(() => getChordPadTight());
+  useEffect(() => {
+    audioEngine.setChordPadTight(tight);
+    saveChordPadTight(tight);
+  }, [tight]);
   const [activeChordKey, setActiveChordKey] = useState<string | null>(null);
   const [inversion, setInversion] = useState(() => initialChordPadState?.inversion ?? 0);
   const [autoChordRetry, setAutoChordRetry] = useState(0);
@@ -347,6 +352,19 @@ export function ChordPad({
           aria-pressed={latched}
         >
           {latched ? 'Latch On' : 'Latch Off'}
+        </button>
+        <button
+          type="button"
+          className={`h-7 border-2 px-2 font-mono text-[10px] font-black uppercase ${
+            tight
+              ? 'border-black bg-black text-white'
+              : 'border-black bg-white text-black hover:bg-black hover:text-white'
+          }`}
+          onClick={() => setTight(value => !value)}
+          aria-pressed={tight}
+          title="Fast attack and short release for chord hits"
+        >
+          Tight
         </button>
         <div className="flex items-center gap-1 text-[11px] font-black uppercase text-black">
           <button

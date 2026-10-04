@@ -9,7 +9,8 @@
     "start": "next start",
     "lint": "eslint .",
     "test:audio": "node scripts/test-audio-routing.mjs",
-    "test:chords": "node scripts/test-chord-bank.mjs"
+    "test:chords": "node scripts/test-chord-bank.mjs",
+    "test:envelope": "node scripts/test-chord-envelope.mjs"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.2.2",

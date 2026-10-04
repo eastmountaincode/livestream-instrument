@@ -61,6 +61,7 @@ interface SavedState {
   keyboardVolume: number;
   midiKeyboardEnabled: boolean;
   chordPadVolume: number;
+  chordPadTight: boolean;
   chordPad: ChordPadState | null;
   chordBank: ChordSpec[];
   chordSequencer: ChordSequencerState;
@@ -124,6 +125,7 @@ function normalizeSavedState(state: StoredStateInput | null): SavedState {
     chordPadVolume: typeof savedChordPadVolume === 'number' && Number.isFinite(savedChordPadVolume)
       ? savedChordPadVolume
       : DEFAULT_CHORD_PAD_VOLUME,
+    chordPadTight: state?.chordPadTight === true,
     chordPad: savedChordPadState && typeof savedChordPadState === 'object'
       ? normalizeChordPadState(savedChordPadState)
       : null,
@@ -302,6 +304,16 @@ export function saveChordPadVolume(chordPadVolume: number): void {
 
 export function getChordPadVolume(): number {
   return getCurrent().chordPadVolume;
+}
+
+export function getChordPadTight(): boolean {
+  return getCurrent().chordPadTight;
+}
+
+export function saveChordPadTight(tight: boolean): void {
+  const state = getCurrent();
+  state.chordPadTight = tight;
+  save(state);
 }
 
 export function saveChordPadState(chordPad: ChordPadState): void {
