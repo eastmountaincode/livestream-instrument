@@ -14,24 +14,37 @@ function lowResonanceTrimDb(q: number): number {
   return -3 * Math.max(0, Math.min(1, 1 - Math.log10(q)));
 }
 
-function responsePower(frequency: number, bands: ResonanceBand[], q: number, sampleRate: number): number {
-  const w = 2 * Math.PI * frequency / sampleRate;
-  const cos = Math.cos(w), sin = Math.sin(w);
-  const cos2 = Math.cos(2 * w), sin2 = Math.sin(2 * w);
-  let real = 0, imaginary = 0;
+interface PreparedBand {
+  cosine: number;
+  referenceAlpha: number;
+  currentAlpha: number;
+  gain: number;
+}
+
+// Divide the biquad numerator and denominator by exp(-iw). This is the
+// same complex bandpass response, with the frequency trig shared across
+// every band and both Q values instead of recalculated in the inner loop.
+function responsePowers(cosine: number, sine: number, bands: PreparedBand[]): [number, number] {
+  let refReal = 0, refImaginary = 0, curReal = 0, curImaginary = 0;
   for (const band of bands) {
-    const center = 2 * Math.PI * band.frequency / sampleRate;
-    const alpha = Math.sin(center) / (2 * q);
-    const a1 = -2 * Math.cos(center);
-    const dr = 1 + alpha + a1 * cos + (1 - alpha) * cos2;
-    const di = -a1 * sin - (1 - alpha) * sin2;
-    const nr = alpha * (1 - cos2), ni = alpha * sin2;
-    const denominator = dr * dr + di * di;
-    if (denominator < 1e-24) continue;
-    real += band.gain * (nr * dr + ni * di) / denominator;
-    imaginary += band.gain * (ni * dr - nr * di) / denominator;
+    const delta = cosine - band.cosine;
+    const reference = band.referenceAlpha * sine;
+    const current = band.currentAlpha * sine;
+    const refDenominator = delta * delta + reference * reference;
+    const curDenominator = delta * delta + current * current;
+    if (refDenominator >= 2.5e-25) {
+      const scale = band.gain * reference / refDenominator;
+      refReal += scale * reference;
+      refImaginary += scale * delta;
+    }
+    if (curDenominator >= 2.5e-25) {
+      const scale = band.gain * current / curDenominator;
+      curReal += scale * current;
+      curImaginary += scale * delta;
+    }
   }
-  return real * real + imaginary * imaginary;
+  return [refReal * refReal + refImaginary * refImaginary,
+    curReal * curReal + curImaginary * curImaginary];
 }
 
 export function estimateResonanceLevelMatch(
@@ -63,13 +76,21 @@ export function estimateResonanceLevelMatch(
     }
   }
   points.sort((a, b) => a - b);
+  const prepared = validBands.map(band => {
+    const center = 2 * Math.PI * band.frequency / sampleRate;
+    const sine = Math.sin(center);
+    return { cosine: Math.cos(center), referenceAlpha: sine / (2 * referenceQ),
+      currentAlpha: sine / (2 * currentQ), gain: band.gain };
+  });
   let reference = 0, current = 0, previousRef = 0, previousCurrent = 0, previousFrequency = 0;
   for (const frequency of points) {
     const bin = frequency / binHz;
     const lower = Math.min(powers.length - 2, Math.floor(bin));
     const power = powers[lower] + (powers[lower + 1] - powers[lower]) * (bin - lower);
-    const ref = power * responsePower(frequency, validBands, referenceQ, sampleRate);
-    const cur = power * responsePower(frequency, validBands, currentQ, sampleRate);
+    const w = 2 * Math.PI * frequency / sampleRate;
+    const [refPower, curPower] = responsePowers(Math.cos(w), Math.sin(w), prepared);
+    const ref = power * refPower;
+    const cur = power * curPower;
     const width = frequency - previousFrequency;
     reference += (previousRef + ref) * width / 2;
     current += (previousCurrent + cur) * width / 2;

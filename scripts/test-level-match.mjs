@@ -40,7 +40,7 @@ if (process.argv[2]) {
   for (let i = 0; i < spectrum.length; i++) spectrum[i] = 10 * Math.log10(power[i] / count);
 }
 
-async function render(q, gain, lowPass = false) {
+async function render(q, gain, lowPass = false, renderedBands = bands) {
   const ctx = new webAudioEngine.OfflineAudioContext(1, noise.length, sampleRate);
   const source = ctx.createBufferSource();
   source.buffer = ctx.createBuffer(1, noise.length, sampleRate);
@@ -51,9 +51,11 @@ async function render(q, gain, lowPass = false) {
     source.connect(input);
   }
   const level = ctx.createGain(); level.gain.value = gain; level.connect(ctx.destination);
-  for (const band of bands) {
+  for (const band of renderedBands) {
     const filter = ctx.createBiquadFilter(); filter.type = 'bandpass'; filter.frequency.value = band.frequency; filter.Q.value = q;
-    input.connect(filter); filter.connect(level);
+    input.connect(filter);
+    const bandGain = ctx.createGain(); bandGain.gain.value = band.gain;
+    filter.connect(bandGain); bandGain.connect(level);
   }
   source.start();
   const data = (await ctx.startRendering()).getChannelData(0).subarray(sampleRate);
@@ -91,3 +93,17 @@ assert.equal(estimate(new Float32Array(4096).fill(-Infinity), sampleRate, bands,
 assert.equal(estimate(spectrum, sampleRate, [], 30, 100), null, 'no notes freezes correction');
 assert.ok(estimate(spectrum, sampleRate, bands, 1, 100) <= 8, 'makeup gain is capped');
 console.log('Level Match checks passed: rendered sweeps, source dynamics, reference, silence, and boost cap.');
+
+// A sustained chord in Harmonic Evidence uses up to 48 coherent bands.
+// Compare the optimized complex response against actual rendered filters.
+const harmonicBands = bands.flatMap(band => Array.from({ length: 8 }, (_, i) => ({
+  frequency: band.frequency * (i + 1), gain: 1 / (i + 1),
+})));
+const harmonicBaseline = await render(30, 1, false, harmonicBands);
+for (const [q, targetDb] of [[1, -3], [10, 0], [100, 0]]) {
+  const correction = estimate(spectrum, sampleRate, harmonicBands, 30, q);
+  const rms = await render(q, correction, false, harmonicBands);
+  const db = 20 * Math.log10(rms / harmonicBaseline);
+  assert.ok(Math.abs(db - targetDb) < 1.5, `48-band chord at Q=${q}: ${db} dB`);
+}
+console.log('48-band held chord checks passed against rendered audio.');

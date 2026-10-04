@@ -1060,7 +1060,9 @@ export class AudioEngine {
     if (!Number.isFinite(q)) return;
     const ch = this.channels.get(id);
     if (!ch) return;
-    ch.filterQ = Math.max(1, Math.min(100, q));
+    const next = Math.max(1, Math.min(100, q));
+    if (next === ch.filterQ) return;
+    ch.filterQ = next;
     if (ch.levelMatch) this.updateLevelMatch(ch);
     const now = this.ctx.currentTime;
     for (const voice of ch.voices) {

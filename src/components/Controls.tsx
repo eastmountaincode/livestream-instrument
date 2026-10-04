@@ -437,7 +437,7 @@ export function Controls({
         </div>
       )}
       <div className="dev-mode dev-mode-cyan grid gap-3 pt-3">
-        <div className="grid gap-x-6 gap-y-2 sm:grid-cols-[minmax(0,240px)_minmax(0,240px)] sm:justify-between">
+        <div className="grid items-start gap-x-6 gap-y-2 sm:grid-cols-[minmax(0,240px)_minmax(0,240px)] sm:justify-between">
           <div className="dev-mode dev-mode-indigo grid w-full max-w-[240px] gap-2">
             <label
                 className="dev-mode dev-mode-violet grid w-full grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-black"
@@ -458,7 +458,6 @@ export function Controls({
                     className="col-span-2 w-full min-w-0"
                     onChange={e => onFilterQChange(1 + parseFloat(e.target.value) * 99)}
                 />
-                <span className="col-span-2 text-[9px] font-bold uppercase text-muted">Mod wheel · all tracks</span>
             </label>
             <label className="dev-mode dev-mode-violet grid w-full grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-black">
               <span className="text-[11px] font-black uppercase">Master</span>

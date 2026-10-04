@@ -14,6 +14,19 @@ const modules = new Map();
 const effects = [];
 const cleanups = [];
 let displayedQ;
+let saves = 0;
+let nextCallbackId = 1;
+const wheelTimers = new Map();
+const timers = new Map();
+const listeners = new Map();
+function flushWheel() {
+    const callbacks = [...wheelTimers.values()]; wheelTimers.clear();
+    for (const callback of callbacks) callback();
+}
+function flushTimers() {
+    const callbacks = [...timers.values()]; timers.clear();
+    for (const callback of callbacks) callback();
+}
 let saved = JSON.stringify({
     activeStreamIds: ['first', 'second'],
     streams: {
@@ -44,10 +57,13 @@ const environment = {
     AudioContext: TestAudioContext,
     localStorage: {
         getItem: () => saved,
-        setItem: (_key, value) => { saved = value; },
+        setItem: (_key, value) => { saved = value; saves++; },
     },
-    window: { setInterval: () => 1, clearInterval: () => {} },
-    setTimeout: () => 1,
+    window: { setInterval: () => 1, clearInterval: () => {}, setTimeout: () => 1,
+        addEventListener: (name, fn) => listeners.set(name, fn),
+        removeEventListener: name => listeners.delete(name) },
+    setTimeout: (callback, delay) => { const id = nextCallbackId++; if (delay === 150) timers.set(id, callback); if (delay === 16) wheelTimers.set(id, callback); return id; },
+    clearTimeout: id => { timers.delete(id); wheelTimers.delete(id); },
     queueMicrotask: callback => Promise.resolve().then(callback),
     console,
 };
@@ -56,6 +72,7 @@ const reactLifecycle = {
         displayedQ = initialize();
         return [displayedQ, next => { displayedQ = next; }];
     },
+    useRef: current => ({ current }),
     useCallback: callback => callback,
     useEffect: callback => { effects.push(callback); },
 };
@@ -112,6 +129,8 @@ audioEngine.noteOn(60, 90, 'keyboard');
 
 const send = data => midiService.handleMidiMessageEvent({ data: Uint8Array.from(data), timeStamp: 0 });
 const assertAllFilters = q => {
+    flushWheel();
+    flushTimers();
     audioEngine.ctx.processTo(audioEngine.ctx.currentTime + 0.2);
     for (const id of ['first', 'second']) {
         assert.equal(audioEngine.getStreamFilterQ(id), q);
@@ -160,9 +179,44 @@ assert.equal(audioEngine.getStreamFilterQ('first'), 1, 'reconnected streams inhe
 audioEngine.setFilterQ(Number.NaN);
 assert.equal(audioEngine.getFilterQ(), 1);
 
+// Reproduce the expensive case: sustained six-note chords, harmonics and
+// Level Match on multiple streams, with a full wheel sweep between control updates.
+audioEngine.setToneMode('harmonic-evidence');
+for (const note of [48, 55, 58, 62, 65, 69]) audioEngine.noteOn(note, 100, 'chord-pad');
+for (const id of ['first', 'second', 'later']) {
+    const channel = audioEngine.channels.get(id);
+    channel.rawAnalyser.getFloatFrequencyData = bins => bins.fill(-40);
+    audioEngine.setStreamLevelMatch(id, true, 30);
+}
+await Promise.resolve();
+let calculations = 0;
+for (const channel of audioEngine.channels.values()) {
+    channel.rawAnalyser.getFloatFrequencyData = bins => { calculations++; bins.fill(-40); };
+}
+const savesBeforeSweep = saves;
+for (let value = 1; value <= 127; value++) send([0xB0, 1, value]);
+assert.equal(calculations, 0, 'MIDI handlers must not calculate spectra per message');
+assert.equal(wheelTimers.size, 1, 'one control update handles the entire queued sweep');
+flushWheel();
+assert.equal(calculations, 3, 'one calculation per stream, not per wheel message');
+assert.equal(audioEngine.getFilterQ(), 100, 'latest position wins without a backlog');
+assert.equal(saves, savesBeforeSweep, 'continuous wheel movement does not write storage');
+flushTimers();
+assert.equal(saves, savesBeforeSweep + 1, 'save once after movement settles');
+send([0xB0, 1, 127]); flushWheel();
+assert.equal(calculations, 3, 'repeated wheel positions do not recalculate');
+send([0xB0, 1, 0]);
+control.updateFilterQ(70);
+flushWheel();
+assert.equal(audioEngine.getFilterQ(), 70, 'slider supersedes a queued wheel update');
+listeners.get('pagehide')();
+assert.equal(storage.getGlobalFilterQ(), 70, 'page exit flushes the last heard setting');
+send([0xB0, 1, 127]);
 for (const cleanup of cleanups) cleanup();
 send([0xB0, 1, 127]);
-assert.equal(audioEngine.getFilterQ(), 1, 'unmount removes the MIDI subscription');
+flushWheel();
+assert.equal(audioEngine.getFilterQ(), 70, 'unmount removes the MIDI subscription and pending wheel update');
+assert.equal(timers.size, 0, 'unmount clears the save timer');
 
 saved = JSON.stringify({ globalFilterQ: 0 });
 assert.equal(storage.getGlobalFilterQ(), 1);
