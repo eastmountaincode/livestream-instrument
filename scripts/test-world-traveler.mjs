@@ -92,7 +92,7 @@ for (const [id, value] of gains()) assert.equal(value, id === slots[0].id ? .8 :
 for (let i = 0; i < 15; i++) {
   send(slots[i].note, i + 1); advance();
   assert.equal(state[1], slots[i].id, 'quiet key presses select the corresponding destination');
-  for (const [id, value] of gains()) assert.equal(value, id === slots[i].id ? engine.getStreamVolume(id) : 0, 'Tight switches without a fade');
+  for (const [id, value] of gains()) assert.equal(value, id === slots[i].id ? .8 : 0, 'Tight switches without a fade');
   send(slots[i].note, 0); assert.equal(state[1], slots[i].id, 'release keeps destination selected');
 }
 assert.deepEqual(Array.from(engine.activeNotes.keys()), originalNotes, 'source keys do not add ordinary notes or change held chord');

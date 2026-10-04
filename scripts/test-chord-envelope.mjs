@@ -12,8 +12,9 @@ const compile = path => ts.transpileModule(readFileSync(new URL(path, import.met
 }).outputText;
 const output = url(compile('../src/services/audioOutput.ts'));
 const router = url(compile('../src/services/audioOutputRouter.ts').replace('"./audioOutput"', JSON.stringify(output)));
+const sourceLevelModule = url(compile('../src/services/sourceLeveling.ts'));
 const levelMatchModule = url(compile('../src/services/resonanceLevelMatch.ts'));
-const { AudioEngine } = await import(url(compile('../src/services/AudioEngine.ts').replace('"./audioOutputRouter"', JSON.stringify(router)).replace("'./resonanceLevelMatch'", JSON.stringify(levelMatchModule))));
+const { AudioEngine } = await import(url(compile('../src/services/AudioEngine.ts').replace('"./audioOutputRouter"', JSON.stringify(router)).replace("'./resonanceLevelMatch'", JSON.stringify(levelMatchModule)).replace("'./sourceLeveling'", JSON.stringify(sourceLevelModule))));
 
 // Render the real engine's note scheduling against a constant source, isolating
 // the envelope from the unpredictable content of a live environmental stream.

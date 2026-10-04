@@ -13,7 +13,8 @@
     "test:chords": "node scripts/test-chord-bank.mjs",
     "test:envelope": "node scripts/test-chord-envelope.mjs",
     "test:level-match": "node scripts/test-level-match.mjs",
-    "test:resonance": "node scripts/test-global-resonance.mjs"
+    "test:resonance": "node scripts/test-global-resonance.mjs",
+    "test:source-leveling": "node scripts/test-source-leveling.mjs"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.2.2",

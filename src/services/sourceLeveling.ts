@@ -1,0 +1,52 @@
+// Input-only leveling: musical envelopes, resonance and performance volumes
+// must never feed back into the gain estimate.
+const TARGET_DB = -26;
+const SILENCE_DB = -60;
+const MAX_BOOST_DB = 18;
+const MAX_CUT_DB = -36;
+const PEAK_CEILING = 0.5;
+
+export interface SourceLevelState {
+  gainDb: number;
+  signalSeconds: number;
+}
+
+export function createSourceLevelState(): SourceLevelState {
+  return { gainDb: 0, signalSeconds: 0 };
+}
+
+export function updateSourceLevel(
+  state: SourceLevelState,
+  samples: Float32Array,
+  elapsedSeconds: number,
+): number {
+  const dt = Math.min(1, Math.max(0, elapsedSeconds));
+  if (!samples.length || !Number.isFinite(dt) || dt === 0) return 10 ** (state.gainDb / 20);
+  let sum = 0;
+  let power = 0;
+  for (const sample of samples) {
+    if (!Number.isFinite(sample)) return 10 ** (state.gainDb / 20);
+    sum += sample;
+    power += sample * sample;
+  }
+  const mean = sum / samples.length;
+  const rms = Math.sqrt(Math.max(0, power / samples.length - mean * mean));
+  if (rms < 10 ** (SILENCE_DB / 20)) {
+    state.signalSeconds = 0;
+    return 10 ** (state.gainDb / 20);
+  }
+  state.signalSeconds += dt;
+  let peak = 0;
+  for (const sample of samples) peak = Math.max(peak, Math.abs(sample - mean));
+  const targetDb = Math.max(MAX_CUT_DB, Math.min(MAX_BOOST_DB,
+    TARGET_DB - 20 * Math.log10(rms), 20 * Math.log10(PEAK_CEILING / peak)));
+  const change = targetDb - state.gainDb;
+  // Do not chase small variations, short pauses, or the first isolated sound.
+  if (Math.abs(change) > 0.5 || (change < 0 && peak * 10 ** (state.gainDb / 20) > PEAK_CEILING)) {
+    if (change < 0 || state.signalSeconds >= 1) {
+      const timeConstant = change < 0 ? 0.15 : 4;
+      state.gainDb += change * (1 - Math.exp(-dt / timeConstant));
+    }
+  }
+  return 10 ** (state.gainDb / 20);
+}

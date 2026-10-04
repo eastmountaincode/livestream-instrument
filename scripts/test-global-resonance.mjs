@@ -243,7 +243,7 @@ function assertTravelerSound(selected) {
     assert.deepEqual(Array.from(audioEngine.getActiveNotes()), heldNotes, 'sweep preserves held notes');
     assert.equal(audioEngine.channels.size, 16, 'sweep preserves every connection');
     for (const [id, channel] of audioEngine.channels) {
-        assert.equal(channel.streamGain.gain.value, id === selected ? channel.volume : 0, 'source gate survives sweeps');
+        assert.equal(channel.streamGain.gain.value, id === selected ? 0.8 : 0, 'source gate survives sweeps');
     }
 }
 for (const value of [0, 32, 64, 96, 127, 0, 127]) {

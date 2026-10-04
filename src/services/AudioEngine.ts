@@ -1,3 +1,4 @@
+import { createSourceLevelState, updateSourceLevel, type SourceLevelState } from './sourceLeveling';
 import { estimateResonanceLevelMatch, type ResonanceBand } from './resonanceLevelMatch';
 import { createAudioOutputRouter } from "./audioOutputRouter";
 /**
@@ -7,7 +8,7 @@ import { createAudioOutputRouter } from "./audioOutputRouter";
  * volume controls and shared global Q (resonance). Notes activate across all streams.
  *
  * Signal chain per stream:
- *   audioElement → mono → filter(bandpass, Q) → voiceGain → streamGain → EQ → limiter → masterGain → ...
+ *   audioElement → mono → sourceLevelGain → filter(bandpass, Q) → voiceGain → streamGain → EQ → limiter → masterGain → ...
  *
  * Master chain:
  *   masterGain → compressor → analyser → destination
@@ -117,6 +118,10 @@ interface StreamChannel {
   levelMatchReferenceQ: number;
   levelMatchPending: boolean;
   levelMatchQueued: boolean;
+  sourceLevelGain: GainNode;
+  sourceLevelState: SourceLevelState;
+  sourceLevelSamples: Float32Array<ArrayBuffer>;
+  sourceLevelUpdatedAt: number;
   rawAnalyser: AnalyserNode;
   analysisBins: Float32Array<ArrayBuffer>;
   analysisUpdatedAt: number;
@@ -160,6 +165,7 @@ export class AudioEngine {
   private harmonicEvidenceColor = 0;
   private harmonicEvidenceResponse = 0.5;
   private analysisTimer: number | null = null;
+  private sourceLevelTimer: number | null = null;
   private keepAliveOscillator: OscillatorNode | null = null;
   private keepAliveGain: GainNode | null = null;
 
@@ -232,6 +238,8 @@ export class AudioEngine {
     rawAnalyser.minDecibels = -100;
     rawAnalyser.maxDecibels = -10;
     monoOut.connect(rawAnalyser);
+    const sourceLevelGain = this.ctx.createGain();
+    monoOut.connect(sourceLevelGain);
 
     const highPassFilter = this.ctx.createBiquadFilter();
     highPassFilter.type = 'highpass';
@@ -270,7 +278,7 @@ export class AudioEngine {
       const gain = this.ctx.createGain();
       gain.gain.value = 0;
 
-      monoOut.connect(filter);
+      sourceLevelGain.connect(filter);
       filter.connect(gain);
       gain.connect(levelMatchGain);
 
@@ -288,7 +296,7 @@ export class AudioEngine {
         harmonicGain.connect(gain);
         harmonicBands.push({
           harmonic,
-          input: monoOut,
+          input: sourceLevelGain,
           filter: harmonicFilter,
           gain: harmonicGain,
           connected: false,
@@ -323,6 +331,10 @@ export class AudioEngine {
       levelMatchReferenceQ: this.filterQ,
       levelMatchPending: false,
       levelMatchQueued: false,
+      sourceLevelGain,
+      sourceLevelState: createSourceLevelState(),
+      sourceLevelSamples: new Float32Array(2048),
+      sourceLevelUpdatedAt: now,
       rawAnalyser,
       analysisBins: new Float32Array(rawAnalyser.frequencyBinCount),
       analysisUpdatedAt: Number.NEGATIVE_INFINITY,
@@ -387,6 +399,7 @@ export class AudioEngine {
         try { voice.gain.disconnect(); } catch { /* ok */ }
       }
       try { ch.source.disconnect(); } catch { /* ok */ }
+      try { ch.sourceLevelGain.disconnect(); } catch { /* ok */ }
       try { ch.rawAnalyser.disconnect(); } catch { /* ok */ }
       try { ch.levelMatchGain.disconnect(); } catch { /* ok */ }
       try { ch.streamGain.disconnect(); } catch { /* ok */ }
@@ -1211,13 +1224,42 @@ export class AudioEngine {
   // never fall back to playing every source.
   private travelerSourceId: string | null = null;
 
+  private updateSourceLevels() {
+    if (this.travelerSourceId == null) return;
+    const now = this.ctx.currentTime;
+    for (const ch of this.channels.values()) {
+      const elapsed = now - ch.sourceLevelUpdatedAt;
+      ch.sourceLevelUpdatedAt = now;
+      if (elapsed <= 0 || ch.audioElement.paused || ch.audioElement.readyState < 2) continue;
+      ch.rawAnalyser.getFloatTimeDomainData(ch.sourceLevelSamples);
+      const previousDb = ch.sourceLevelState.gainDb;
+      const gain = updateSourceLevel(ch.sourceLevelState, ch.sourceLevelSamples, elapsed);
+      if (ch.sourceLevelState.gainDb !== previousDb) {
+        ch.sourceLevelGain.gain.setTargetAtTime(gain, now, gain < ch.sourceLevelGain.gain.value ? 0.03 : 0.15);
+      }
+    }
+  }
+
+  private setSourceLeveling(enabled: boolean) {
+    if (this.sourceLevelTimer != null) window.clearInterval(this.sourceLevelTimer);
+    this.sourceLevelTimer = null;
+    for (const ch of this.channels.values()) {
+      ch.sourceLevelState = createSourceLevelState();
+      ch.sourceLevelUpdatedAt = this.ctx.currentTime;
+      ch.sourceLevelGain.gain.setTargetAtTime(1, this.ctx.currentTime, 0.05);
+    }
+    if (enabled) this.sourceLevelTimer = window.setInterval(() => this.updateSourceLevels(), 200);
+  }
+
   private shouldAnalyzeChannel(ch: StreamChannel): boolean {
     return this.travelerSourceId == null || this.channels.get(this.travelerSourceId) === ch;
   }
 
   setTravelerSource(id: string | null) {
     if (this.travelerSourceId === id) return;
+    const wasTraveling = this.travelerSourceId != null;
     this.travelerSourceId = id;
+    if (wasTraveling !== (id != null)) this.setSourceLeveling(id != null);
     // Keep every stream and voice warm, but defer expensive spectrum work on
     // silent destinations. Refresh the destination before opening its gate.
     for (const ch of this.channels.values()) {
@@ -1247,13 +1289,14 @@ export class AudioEngine {
     for (const [id, ch] of this.channels) {
       const traveling = this.travelerSourceId != null;
       const audible = traveling ? id === this.travelerSourceId && !ch.muted : soloId ? id === soloId : !ch.muted;
+      const volume = traveling ? DEFAULT_VOL : ch.volume;
       const currentGain = ch.streamGain.gain.value;
       ch.streamGain.gain.cancelScheduledValues(now);
       ch.streamGain.gain.setValueAtTime(currentGain, now);
       if (traveling && this.chordPadTight) {
-        ch.streamGain.gain.setValueAtTime(audible ? ch.volume : 0, now);
+        ch.streamGain.gain.setValueAtTime(audible ? volume : 0, now);
       } else {
-        ch.streamGain.gain.setTargetAtTime(audible ? ch.volume : 0, now, 0.01);
+        ch.streamGain.gain.setTargetAtTime(audible ? volume : 0, now, 0.01);
       }
     }
   }
