@@ -58,7 +58,8 @@ const slots = getTravelerSources(candidates);
 assert.equal(slots.length, 19);
 assert.equal(new Set(slots.map(slot => slot.note)).size, 19);
 assert.equal(slots[0].keyLabel, 'C3');
-assert.equal(slots[18].keyLabel, 'F♯4');
+assert.equal(slots[18].keyLabel, 'G5');
+assert.deepEqual(Array.from(slots, slot => slot.note), [48, 50, 52, 53, 55, 57, 59, 60, 62, 64, 65, 67, 69, 71, 72, 74, 76, 77, 79]);
 assert.deepEqual(Array.from(getTravelerSources([...candidates].reverse()), s => s.id), Array.from(slots, s => s.id), 'catalog order cannot reshuffle key assignments');
 const { useWorldTraveler } = load('src/hooks/useWorldTraveler.ts');
 const wanted = new Set(['original', slots[0].id]);
@@ -87,12 +88,16 @@ assert.equal(connections.length, 19, 'connect all fixed destinations');
 advance();
 for (const [id, value] of gains()) assert.equal(value, id === slots[0].id ? .8 : 0, 'background sources are silent');
 for (let i = 0; i < 19; i++) {
-  send(48 + i, i + 1); advance();
+  send(slots[i].note, i + 1); advance();
   assert.equal(state[1], slots[i].id, 'quiet key presses select the corresponding destination');
   for (const [id, value] of gains()) assert.equal(value, id === slots[i].id ? engine.getStreamVolume(id) : 0, 'Tight switches without a fade');
-  send(48 + i, 0); assert.equal(state[1], slots[i].id, 'release keeps destination selected');
+  send(slots[i].note, 0); assert.equal(state[1], slots[i].id, 'release keeps destination selected');
 }
 assert.deepEqual(Array.from(engine.activeNotes.keys()), originalNotes, 'source keys do not add ordinary notes or change held chord');
+for (const note of [49, 51, 54, 56, 58, 61, 63, 66, 68, 70, 73, 75, 78]) {
+  send(note); send(note, 0);
+  assert.equal(state[1], slots[18].id, 'black keys never select a destination');
+}
 send(36, 100, 0x99); assert.equal(state[1], slots[18].id, 'chord pads do not select sources');
 send(90); assert.equal(state[1], slots[18].id, 'unassigned key notes are ignored');
 engine.channels.delete(slots[18].id);

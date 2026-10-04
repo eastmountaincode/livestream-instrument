@@ -25,7 +25,8 @@ const PLACE_LABELS: Record<string, string> = {
   'locus-zurich-community-echo': 'Zurich',
   'locus-usti-nad-labem-duul': 'Ústí nad Labem',
 };
-const NOTE_NAMES = ['C', 'C♯', 'D', 'D♯', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'A♯', 'B'];
+const WHITE_KEY_OFFSETS = [0, 2, 4, 5, 7, 9, 11];
+const WHITE_KEY_NAMES = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
 export const TRAVELER_FIRST_NOTE = 48;
 export interface TravelerSource { id: string; label: string; note: number; keyLabel: string }
 
@@ -37,12 +38,13 @@ export function getTravelerSources(sources: LiveSource[]): TravelerSource[] {
     ...sources.filter(source => !originals.has(source.id)).sort((a, b) => a.id.localeCompare(b.id)),
   ];
   return ordered.map((source, index) => {
-    const note = TRAVELER_FIRST_NOTE + index;
+    const keyIndex = index % WHITE_KEY_OFFSETS.length;
+    const note = TRAVELER_FIRST_NOTE + Math.floor(index / WHITE_KEY_OFFSETS.length) * 12 + WHITE_KEY_OFFSETS[keyIndex];
     return {
       id: source.id,
       label: originals.get(source.id) ?? PLACE_LABELS[source.id] ?? source.location ?? source.name,
       note,
-      keyLabel: `${NOTE_NAMES[note % 12]}${Math.floor(note / 12) - 1}`,
+      keyLabel: `${WHITE_KEY_NAMES[keyIndex]}${Math.floor(note / 12) - 1}`,
     };
   });
 }

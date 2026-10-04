@@ -64,8 +64,8 @@ for (let i = 0; i < keys.length; i++) {
   send(keys[i], 0); assert.ok(notes().length, 'latched chord survives note off');
 }
 const before = notes();
-for (let note = 48; note <= 66; note++) { send(note, 100, 0x90); send(note, 0, 0x90); }
-assert.deepEqual(notes(), before, 'all nineteen source keys preserve the current chord');
+for (let note = 48; note <= 79; note++) { send(note, 100, 0x90); send(note, 0, 0x90); }
+assert.deepEqual(notes(), before, 'source keys and unused black keys preserve the current chord');
 assert.equal(rawAttacks, 0, 'source keys never add ordinary keyboard voices');
 send(43); assert.equal(notes().length, 0, 'latched repeat toggles chord off'); send(43, 0);
 findButton(render(), 'Latch On').props.onClick(); render();
