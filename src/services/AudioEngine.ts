@@ -318,7 +318,7 @@ export class AudioEngine {
       source,
       streamGain,
       levelMatchGain,
-      levelMatch: false,
+      levelMatch: true,
       levelMatchReferenceQ: DEFAULT_Q,
       levelMatchPending: false,
       levelMatchQueued: false,
@@ -1089,7 +1089,7 @@ export class AudioEngine {
 
   getStreamLevelMatch(id: string) {
     const ch = this.channels.get(id);
-    return { enabled: ch?.levelMatch ?? false, referenceQ: ch?.levelMatchReferenceQ ?? DEFAULT_Q };
+    return { enabled: ch?.levelMatch ?? true, referenceQ: ch?.levelMatchReferenceQ ?? DEFAULT_Q };
   }
 
   private updateLevelMatch(ch: StreamChannel) {

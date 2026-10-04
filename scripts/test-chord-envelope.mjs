@@ -132,7 +132,10 @@ try {
   assert.equal(storage.getChordPadTight(), true, 'other preference writes preserve Tight');
   assert.deepEqual(storage.getChordBank(), [{ root: 4, type: 'min11', inversion: 1 }]);
   storage.saveStreamSettings('fixture', { filterQ: 45, volume: 0.7 });
-  assert.equal(storage.getStreamSettings('fixture').levelMatch, false, 'legacy tracks default off');
+  assert.equal(storage.getStreamSettings('fixture').levelMatch, true, 'legacy tracks default on');
+  assert.equal(storage.getStreamSettings('fixture').levelMatchReferenceQ, 45, 'legacy reference uses saved resonance');
+  storage.saveStreamSettings('fixture', { ...storage.getStreamSettings('fixture'), levelMatch: false });
+  assert.equal(storage.getStreamSettings('fixture').levelMatch, false, 'saved off preference is respected');
   storage.saveStreamSettings('fixture', { ...storage.getStreamSettings('fixture'), levelMatch: true, levelMatchReferenceQ: 65 });
   storage.saveMasterVolume(0.4);
   assert.equal(storage.getStreamSettings('fixture').levelMatch, true);

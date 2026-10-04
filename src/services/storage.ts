@@ -159,7 +159,7 @@ function normalizeHarmonicEvidenceSettings(value: unknown): HarmonicEvidenceSett
 function normalizeStreamSettings(settings: Partial<StreamSettings>): StreamSettings {
   return {
     filterQ: typeof settings.filterQ === 'number' && Number.isFinite(settings.filterQ) ? settings.filterQ : 30,
-    levelMatch: settings.levelMatch === true,
+    levelMatch: settings.levelMatch !== false,
     levelMatchReferenceQ: typeof settings.levelMatchReferenceQ === 'number' && Number.isFinite(settings.levelMatchReferenceQ)
       ? Math.max(1, Math.min(100, settings.levelMatchReferenceQ))
       : Math.max(1, Math.min(100, typeof settings.filterQ === 'number' && Number.isFinite(settings.filterQ) ? settings.filterQ : 30)),

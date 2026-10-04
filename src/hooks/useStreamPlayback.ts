@@ -335,10 +335,11 @@ export function useStreamPlayback({
       const defaultSettings = defaultsRef.current[source.id];
       const shouldSaveDefaults = !savedSettings && !!defaultSettings;
 
+      const filterQ = savedSettings?.filterQ ?? defaultSettings?.filterQ ?? audioEngine.getStreamFilterQ(source.id);
       const nextSettings: StreamSettings = {
-        filterQ: savedSettings?.filterQ ?? defaultSettings?.filterQ ?? audioEngine.getStreamFilterQ(source.id),
-        levelMatch: savedSettings?.levelMatch ?? false,
-        levelMatchReferenceQ: savedSettings?.levelMatchReferenceQ ?? savedSettings?.filterQ ?? 30,
+        filterQ,
+        levelMatch: savedSettings?.levelMatch ?? true,
+        levelMatchReferenceQ: savedSettings?.levelMatchReferenceQ ?? filterQ,
         volume: savedSettings?.volume ?? defaultSettings?.volume ?? audioEngine.getStreamVolume(source.id),
         highPassFreq: savedSettings?.highPassFreq ?? defaultSettings?.highPassFreq ?? audioEngine.getStreamHighPass(source.id),
         lowPassFreq: savedSettings?.lowPassFreq ?? defaultSettings?.lowPassFreq ?? audioEngine.getStreamLowPass(source.id),
