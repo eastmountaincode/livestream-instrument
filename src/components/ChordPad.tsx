@@ -7,7 +7,6 @@ import { getChordBank, getChordPadState, getChordPadTight, saveChordPadTight, sa
 import {
   buildRelatedChordBank,
   buildChordNotes,
-  CHORD_GROUPS,
   CHORD_TYPES,
   chordKey,
   clampInversion,
@@ -444,74 +443,10 @@ export function ChordPad({
         </div>
       )}
 
-      {/* Root note selector */}
-      <div className="grid grid-cols-6 gap-1 sm:grid-cols-12">
-        {ROOT_NOTES.map(({ name, semitone }) => (
-          <button
-            key={semitone}
-            className={`h-7 border-2 px-0.5 text-center font-mono text-[11px] font-black ${
-              selectedRoot === semitone
-                ? 'border-black bg-black text-white'
-                : name.includes('#')
-                  ? 'border-black bg-black text-white hover:bg-ink-hover'
-                  : 'border-black bg-white text-black hover:bg-black hover:text-white'
-            }`}
-            onClick={() => {
-              setSelectedRoot(semitone);
-              if (prevNotes.current.length === 0) {
-                rememberChordState(semitone, selectedType, inversion, false);
-              }
-            }}
-          >
-            {name}
-          </button>
-        ))}
-      </div>
-
-      {/* Chord type grid */}
-      {CHORD_GROUPS.map(group => (
-        <div key={group.label} className="grid gap-1 sm:grid-cols-[48px_minmax(0,1fr)] sm:items-start">
-          <span className="pt-1 text-right text-[10px] font-black uppercase text-black">{group.label}</span>
-          <div className="flex flex-wrap gap-1">
-            {group.types.map(type => {
-              const def = CHORD_TYPES[type];
-              if (!def) return null;
-              const active = activeChordKey === chordKey(selectedRoot, type);
-              const selected = selectedType === type;
-              return (
-                <button
-                  key={type}
-                  className={`h-7 min-w-[56px] border-2 px-2 text-center font-mono text-[10px] font-black ${
-                    active
-                      ? 'border-black bg-black text-white'
-                      : selected
-                        ? 'border-black bg-soft text-black hover:bg-black hover:text-white'
-                        : 'border-black bg-white text-black hover:bg-black hover:text-white'
-                  }`}
-                  onClick={() => {
-                    if (latched) handleLatchedChordTrigger(selectedRoot, type);
-                  }}
-                  onPointerDown={event => handleChordPointerDown(event, selectedRoot, type)}
-                  onPointerUp={handleChordPointerEnd}
-                  onPointerCancel={handleChordPointerEnd}
-                  onKeyDown={event => handleChordKeyDown(event, selectedRoot, type)}
-                  onKeyUp={handleChordKeyUp}
-                  aria-label={`Play ${NOTE_NAMES[selectedRoot]} ${def.label}`}
-                  aria-pressed={active}
-                  title={def.label}
-                >
-                  {NOTE_NAMES[selectedRoot]}{def.short}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      ))}
-
       {/* Root+chord grid: all 12 roots as rows, common chords as columns */}
       <div className="overflow-x-auto border-2 border-black">
         <div className="min-w-[520px]">
-        <div className="flex border-b-2 border-black bg-soft">
+        <div className="flex bg-soft">
           <span className="min-w-[36px] px-1 py-[3px]" aria-hidden="true" />
           {COMMON_CHORD_TYPES.map(type => (
             <span key={type} className="flex-1 px-0.5 py-[3px] text-center text-[9px] font-black text-black">{CHORD_TYPES[type].short || 'M'}</span>

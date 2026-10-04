@@ -31,7 +31,7 @@ export function Panel({ title, label, open, onToggle, children, meta, className,
     <section className={cx('w-full border border-ink bg-paper', className)}>
       <button
         type="button"
-        className="flex min-h-11 w-full items-center justify-between gap-3 border-b border-ink bg-surface px-3 py-2 text-left text-[11px] font-semibold uppercase text-copy hover:bg-ink hover:text-paper"
+        className={cx('flex min-h-11 w-full items-center justify-between gap-3 bg-surface px-3 py-2 text-left text-[11px] font-semibold uppercase text-copy hover:bg-ink hover:text-paper', open && 'border-b border-ink')}
         onClick={onToggle}
         aria-expanded={open}
       >
@@ -39,10 +39,7 @@ export function Panel({ title, label, open, onToggle, children, meta, className,
           {label && <span className="min-w-8 font-mono text-[10px] font-semibold">{label}</span>}
           <span className="truncate">{title}</span>
         </span>
-        <span className="flex shrink-0 items-center gap-2 font-mono text-[10px] font-semibold">
-          {meta}
-          <span>{open ? 'Close' : 'Open'}</span>
-        </span>
+        {meta && <span className="shrink-0 font-mono text-[10px] font-semibold">{meta}</span>}
       </button>
       {(open || keepMounted) && (
         <div className={cx('p-3', !open && 'hidden', bodyClassName)}>

@@ -141,6 +141,10 @@ try {
   assert.equal(storage.getStreamSettings('fixture').levelMatch, true);
   assert.equal(storage.getStreamSettings('fixture').levelMatchReferenceQ, 65);
   assert.equal(storage.getStreamSettings('fixture').volume, 0.7);
+  storage.saveStreamSettings('fixture', { ...storage.getStreamSettings('fixture'), volume: 16 });
+  assert.equal(storage.getStreamSettings('fixture').volume, 4, 'old high gains fit the new slider range');
+  storage.saveStreamSettings('fixture', { ...storage.getStreamSettings('fixture'), volume: 0 });
+  assert.equal(storage.getStreamSettings('fixture').volume, 0, 'track gain can still reach silence');
   storage.saveChordPadTight(false);
   assert.equal(storage.getChordPadTight(), false);
 } finally {

@@ -1,6 +1,7 @@
 import { DEFAULT_CHORD_VELOCITY, normalizeChordSpec, type ChordSpec } from '../music/chords';
 
 const STORAGE_KEY = 'resonator-state';
+export const MAX_STREAM_VOLUME = 4;
 const DEFAULT_MASTER_VOLUME = 1;
 const DEFAULT_KEYBOARD_VOLUME = 3.2;
 const DEFAULT_CHORD_PAD_VOLUME = 1.55;
@@ -174,7 +175,8 @@ function normalizeStreamSettings(settings: Partial<StreamSettings>): StreamSetti
     levelMatchReferenceQ: typeof settings.levelMatchReferenceQ === 'number' && Number.isFinite(settings.levelMatchReferenceQ)
       ? Math.max(1, Math.min(100, settings.levelMatchReferenceQ))
       : Math.max(1, Math.min(100, typeof settings.filterQ === 'number' && Number.isFinite(settings.filterQ) ? settings.filterQ : 30)),
-    volume: typeof settings.volume === 'number' && Number.isFinite(settings.volume) ? settings.volume : 0.8,
+    volume: typeof settings.volume === 'number' && Number.isFinite(settings.volume)
+      ? Math.max(0, Math.min(MAX_STREAM_VOLUME, settings.volume)) : 0.8,
     highPassFreq: typeof settings.highPassFreq === 'number' && Number.isFinite(settings.highPassFreq) ? settings.highPassFreq : DEFAULT_HIGH_PASS_FREQ,
     lowPassFreq: typeof settings.lowPassFreq === 'number' && Number.isFinite(settings.lowPassFreq) ? settings.lowPassFreq : DEFAULT_LOW_PASS_FREQ,
     pan: typeof settings.pan === 'number' && Number.isFinite(settings.pan) ? settings.pan : 0,

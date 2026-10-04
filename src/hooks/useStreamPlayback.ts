@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import { audioEngine } from '../services/AudioEngine';
 import { getOrcasoundStreamUrl, type LiveSource } from '../services/streams';
-import { getStreamSettings, saveStreamSettings, type StreamSettings } from '../services/storage';
+import { MAX_STREAM_VOLUME, getStreamSettings, saveStreamSettings, type StreamSettings } from '../services/storage';
 
 export type StreamPlaybackPhase =
   | 'idle'
@@ -338,9 +338,10 @@ export function useStreamPlayback({
       const filterQ = audioEngine.getFilterQ();
       const nextSettings: StreamSettings = {
         filterQ,
-        levelMatch: savedSettings?.levelMatch ?? true,
+        // Keep the engine bypass available, but always match levels in the UI.
+        levelMatch: true,
         levelMatchReferenceQ: savedSettings?.levelMatchReferenceQ ?? filterQ,
-        volume: savedSettings?.volume ?? defaultSettings?.volume ?? audioEngine.getStreamVolume(source.id),
+        volume: Math.max(0, Math.min(MAX_STREAM_VOLUME, savedSettings?.volume ?? defaultSettings?.volume ?? audioEngine.getStreamVolume(source.id))),
         highPassFreq: savedSettings?.highPassFreq ?? defaultSettings?.highPassFreq ?? audioEngine.getStreamHighPass(source.id),
         lowPassFreq: savedSettings?.lowPassFreq ?? defaultSettings?.lowPassFreq ?? audioEngine.getStreamLowPass(source.id),
         pan: savedSettings?.pan ?? defaultSettings?.pan ?? audioEngine.getStreamPan(source.id),

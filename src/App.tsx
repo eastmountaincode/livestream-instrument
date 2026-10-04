@@ -261,7 +261,6 @@ function App() {
               title="Live Sources"
               open={openPanels.sources}
               onToggle={() => togglePanel('sources')}
-              meta={`${activeIds.size}/${availableSources.length}`}
               className={shouldEqualizeTopPanels ? 'h-full' : ''}
               keepMounted
             >

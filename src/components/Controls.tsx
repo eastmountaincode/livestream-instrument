@@ -5,6 +5,7 @@ import type { LiveSource } from '../services/streams';
 import { midiService } from '../services/MidiService';
 import { TrackWaveform } from './TrackWaveform';
 import {
+  MAX_STREAM_VOLUME,
   saveStreamSettings,
   getStreamSettings,
   getMasterVolume,
@@ -31,7 +32,6 @@ interface Props {
   onRemoveSource: (sourceId: string) => void;
 }
 
-const MAX_STREAM_VOLUME = 16;
 const MAX_MIDI_STREAM_VOLUME = MAX_STREAM_VOLUME;
 const MIN_EQ_FREQ = 20;
 const MAX_EQ_FREQ = 20000;
@@ -102,7 +102,6 @@ function StreamControls({
 
   // Load saved settings once and use as initial state
   const [saved] = useState(() => getStreamSettings(id));
-  const [levelMatch, setLevelMatch] = useState(() => saved?.levelMatch ?? audioEngine.getStreamLevelMatch(id).enabled);
   const [vol, setVol] = useState(() => saved?.volume ?? audioEngine.getStreamVolume(id));
   const [highPassFreq, setHighPassFreq] = useState(() => saved?.highPassFreq ?? audioEngine.getStreamHighPass(id));
   const [lowPassFreq, setLowPassFreq] = useState(() => saved?.lowPassFreq ?? audioEngine.getStreamLowPass(id));
@@ -114,7 +113,7 @@ function StreamControls({
   useEffect(() => {
     if (initRef.current || !saved) return;
     initRef.current = true;
-    audioEngine.setStreamLevelMatch(id, saved.levelMatch, saved.levelMatchReferenceQ);
+    audioEngine.setStreamLevelMatch(id, true, saved.levelMatchReferenceQ);
     audioEngine.setStreamVolume(id, saved.volume);
     audioEngine.setStreamHighPass(id, saved.highPassFreq);
     audioEngine.setStreamLowPass(id, saved.lowPassFreq);
@@ -161,21 +160,6 @@ function StreamControls({
           )}
         </div>
         <div className="dev-mode dev-mode-pink ml-auto flex shrink-0 items-center gap-1 text-[11px] font-black uppercase text-black">
-          <button
-            type="button"
-            className={`h-7 shrink-0 border-2 border-black px-2 font-mono text-[10px] font-black uppercase ${levelMatch ? 'bg-black text-white' : 'bg-white text-black hover:bg-black hover:text-white'}`}
-            aria-label={`Level Match ${source?.name ?? id}`}
-            aria-pressed={levelMatch}
-            title="Keep resonance sweeps close to the current level"
-            onClick={() => {
-              const next = !levelMatch;
-              audioEngine.setStreamLevelMatch(id, next);
-              setLevelMatch(next);
-              persist({});
-            }}
-          >
-            Level Match
-          </button>
           <div className="dev-mode dev-mode-blue flex items-center gap-1">
             <button
               className="icon-button flex h-7 w-7 items-center justify-center border-2 border-black p-0"
