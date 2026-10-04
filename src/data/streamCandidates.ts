@@ -520,8 +520,8 @@ export const STREAM_CANDIDATE_SEEDS: StreamCandidate[] = ([
     pageUrl: 'https://locusonus.org/soundmap/',
     format: 'MP3 Icecast',
     source: 'Locus Sonus / CreaCast',
-    status: 'accepted',
-    notes: 'Nature reserve microphone at Buitenlanden Langenholte, a Vecht/Zwarte Water river floodplain wetland north of Zwolle. Credits: Wijnand Bredewold / Stichting Landschap Overijssel.',
+    status: 'rejected',
+    notes: 'Inactive for performance: quieter and less useful than the Zwolle - Langenholte feed. Nature reserve microphone at Buitenlanden Langenholte, a Vecht/Zwarte Water river floodplain wetland north of Zwolle. Credits: Wijnand Bredewold / Stichting Landschap Overijssel.',
   },
   {
     id: 'locus-seoul-gusan',
