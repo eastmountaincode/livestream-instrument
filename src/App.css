@@ -292,4 +292,6 @@ input[type="range"]::-moz-range-track {
   letter-spacing: -0.055em;
   line-height: 1;
   color: var(--color-ink);
+  -webkit-text-stroke: 0.015em var(--color-paper);
+  paint-order: stroke fill;
 }
