@@ -45,8 +45,13 @@ class TestAudioContext extends webAudioEngine.RenderingAudioContext {
 
     createMediaElementSource() {
         const source = this.createBufferSource();
-        source.buffer = this.createBuffer(1, 128, this.sampleRate);
-        source.buffer.getChannelData(0).fill(0.001);
+        source.buffer = this.createBuffer(1, 8192, this.sampleRate);
+        let seed = 42;
+        const samples = source.buffer.getChannelData(0);
+        for (let i = 0; i < samples.length; i++) {
+            seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+            samples[i] = (seed / 2 ** 32 - 0.5) * 0.01;
+        }
         source.loop = true;
         source.start();
         return source;
@@ -209,6 +214,58 @@ send([0xB0, 1, 0]);
 control.updateFilterQ(70);
 flushWheel();
 assert.equal(audioEngine.getFilterQ(), 70, 'slider supersedes a queued wheel update');
+// A real held chord across sixteen streams must remain audible through wheel
+// and slider sweeps, without automating silent destinations' filter banks.
+for (let i = 3; i < 16; i++) audioEngine.addStream(`traveler-${i}`, {});
+audioEngine.setChordPadTight(true);
+audioEngine.setTravelerSource('first');
+await Promise.resolve();
+const writes = new Map();
+for (const [id, channel] of audioEngine.channels) {
+    channel.rawAnalyser.getFloatFrequencyData = bins => bins.fill(-40);
+    for (const voice of channel.voices) {
+        for (const filter of [voice.filter, ...voice.harmonicBands.map(band => band.filter)]) {
+            const original = filter.Q.setTargetAtTime.bind(filter.Q);
+            filter.Q.setTargetAtTime = (...args) => {
+                writes.set(id, (writes.get(id) ?? 0) + 1);
+                return original(...args);
+            };
+        }
+    }
+}
+const heldNotes = Array.from(audioEngine.getActiveNotes());
+function assertTravelerSound(selected) {
+    audioEngine.ctx.processTo(audioEngine.ctx.currentTime + 0.08);
+    const samples = audioEngine.ctx.exportAsAudioData().channelData[0].slice(-1024);
+    assert.ok(samples.every(Number.isFinite), 'resonance cannot poison audio with nonfinite samples');
+    const rms = Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length);
+    assert.ok(rms > 1e-7, 'the held Traveler chord remains audible after resonance changes');
+    assert.deepEqual(Array.from(audioEngine.getActiveNotes()), heldNotes, 'sweep preserves held notes');
+    assert.equal(audioEngine.channels.size, 16, 'sweep preserves every connection');
+    for (const [id, channel] of audioEngine.channels) {
+        assert.equal(channel.streamGain.gain.value, id === selected ? channel.volume : 0, 'source gate survives sweeps');
+    }
+}
+for (const value of [0, 32, 64, 96, 127, 0, 127]) {
+    writes.clear();
+    send([0xB0, 1, value]); flushWheel();
+    assert.deepEqual([...writes.keys()], ['first'], 'wheel only automates the selected source');
+    assert.equal(writes.get('first'), heldNotes.length * 8, 'wheel only automates held voices, including their harmonics');
+    assertTravelerSound('first');
+}
+audioEngine.setTravelerSource('second');
+for (const voice of audioEngine.channels.get('second').activeVoices.values()) {
+    assert.equal(voice.filter.Q._impl.getTimeline().at(-1).args[0], 100, 'source switch schedules pending resonance immediately before unmuting');
+}
+assertTravelerSound('second');
+control.updateFilterQ(70);
+assertTravelerSound('second');
+audioEngine.setTravelerSource(null);
+audioEngine.ctx.processTo(audioEngine.ctx.currentTime + 0.08);
+for (const channel of audioEngine.channels.values()) {
+    for (const voice of channel.activeVoices.values()) assert.equal(voice.filter.Q.value, 70, 'normal mode restores the latest resonance to every source');
+}
+console.log('Traveler resonance audio checks passed: sixteen streams, wheel and slider sweeps, held chord signal, source switching, bounded filter updates, and mode exit.');
 listeners.get('pagehide')();
 assert.equal(storage.getGlobalFilterQ(), 70, 'page exit flushes the last heard setting');
 send([0xB0, 1, 127]);

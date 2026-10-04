@@ -1064,11 +1064,23 @@ export class AudioEngine {
     if (next === ch.filterQ) return;
     ch.filterQ = next;
     if (ch.levelMatch) this.updateLevelMatch(ch);
+    if (this.shouldAnalyzeChannel(ch)) this.applyChannelFilterQ(ch);
+  }
+
+  private applyChannelFilterQ(ch: StreamChannel, immediate = false) {
     const now = this.ctx.currentTime;
-    for (const voice of ch.voices) {
-      voice.filter.Q.setTargetAtTime(ch.filterQ, now, 0.01);
-      for (const band of voice.harmonicBands) {
-        band.filter.Q.setTargetAtTime(ch.filterQ, now, 0.01);
+    // Silent Traveler destinations retain the setting without sending thousands
+    // of redundant AudioParam messages during a wheel sweep. New notes receive
+    // the latest Q in noteOnForChannel; source selection catches up held notes.
+    const voices = this.travelerSourceId != null ? ch.activeVoices.values() : ch.voices;
+    for (const voice of voices) {
+      for (const filter of [voice.filter, ...voice.harmonicBands.map(band => band.filter)]) {
+        if (immediate) {
+          filter.Q.cancelScheduledValues(now);
+          filter.Q.setValueAtTime(ch.filterQ, now);
+        } else {
+          filter.Q.setTargetAtTime(ch.filterQ, now, 0.01);
+        }
       }
     }
   }
@@ -1208,6 +1220,9 @@ export class AudioEngine {
     this.travelerSourceId = id;
     // Keep every stream and voice warm, but defer expensive spectrum work on
     // silent destinations. Refresh the destination before opening its gate.
+    for (const ch of this.channels.values()) {
+      if (this.shouldAnalyzeChannel(ch)) this.applyChannelFilterQ(ch, true);
+    }
     this.updateAnalyzedToneVoices();
     for (const ch of this.channels.values()) {
       if (this.shouldAnalyzeChannel(ch)) this.updateLevelMatch(ch);
