@@ -29,7 +29,8 @@ interface Props {
   chordPadVolume: number;
   onKeyboardVolumeChange: (volume: number) => void;
   onChordPadVolumeChange: (volume: number) => void;
-  onRemoveSource: (sourceId: string) => void;
+  onRemoveSource?: (sourceId: string) => void;
+  numbered?: boolean;
 }
 
 const MAX_MIDI_STREAM_VOLUME = MAX_STREAM_VOLUME;
@@ -85,15 +86,17 @@ function StreamControls({
   sources,
   clock,
   onRemoveSource,
+  number,
 }: {
   id: string;
+  number?: number;
   soloId: string | null;
   onSolo: (id: string | null) => void;
   externalVolume?: number;
   onManualVolumeChange: (id: string) => void;
   sources: LiveSource[];
   clock: Date;
-  onRemoveSource: (sourceId: string) => void;
+  onRemoveSource?: (sourceId: string) => void;
 }) {
   const source = sources.find(s => s.id === id);
   const localTime = formatLocalTime(clock, source?.timeZone);
@@ -139,11 +142,11 @@ function StreamControls({
   const displayedVolume = externalVolume ?? vol;
 
   return (
-    <div className="dev-mode dev-mode-coral grid gap-3 bg-soft px-2 py-2.5">
+    <div className={`dev-mode dev-mode-coral grid gap-3 bg-soft px-2 py-2.5 ${number && soloId === id ? 'ring-2 ring-inset ring-ink' : ''}`}>
       <div className="dev-mode dev-mode-orange flex min-w-0 flex-wrap items-start gap-2">
         <div className="dev-mode dev-mode-yellow flex min-w-[140px] flex-1 flex-wrap items-center gap-x-2 gap-y-1">
           <span className="sc-name min-w-0 basis-full whitespace-normal break-words text-[12px] font-black uppercase leading-snug text-black sm:basis-auto">
-            {source?.name ?? id}
+            {number ? `${number}. ` : ''}{source?.name ?? id}
           </span>
           {source?.location && (
             <span className="shrink-0 text-[10px] font-bold uppercase text-black">{source.location}</span>
@@ -221,7 +224,7 @@ function StreamControls({
           >
             M
           </button>
-          <button
+          {onRemoveSource && <button
             type="button"
             className="icon-button flex h-7 w-7 shrink-0 items-center justify-center border-2 border-black p-0"
             onClick={() => onRemoveSource(id)}
@@ -229,7 +232,7 @@ function StreamControls({
             title="Remove track"
           >
             <X aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={2.5} />
-          </button>
+          </button>}
         </div>
       </div>
       <div className="dev-mode dev-mode-cyan grid min-w-0 items-start gap-4 sm:grid-cols-[92px_minmax(0,1fr)]">
@@ -331,6 +334,7 @@ export function Controls({
   onKeyboardVolumeChange,
   onChordPadVolumeChange,
   onRemoveSource,
+  numbered = false,
 }: Props) {
   const [masterVolume, setMasterVolume] = useState(() => getMasterVolume());
   const [harmonicEvidenceSettings, setHarmonicEvidenceSettings] = useState(
@@ -405,10 +409,11 @@ export function Controls({
       )}
       {streamIds.length > 0 && (
         <div className="dev-mode dev-mode-cyan grid gap-2">
-          {streamIds.map(id => (
+          {streamIds.map((id, index) => (
             <StreamControls
               key={id}
               id={id}
+              number={numbered ? index + 1 : undefined}
               soloId={soloId}
               onSolo={onSoloChange}
               externalVolume={midiMappedVolumes[id]}

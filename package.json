@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "eslint .",
     "test:audio": "node scripts/test-audio-routing.mjs",
+    "test:traveler": "node scripts/test-world-traveler.mjs",
     "test:chords": "node scripts/test-chord-bank.mjs",
     "test:envelope": "node scripts/test-chord-envelope.mjs",
     "test:level-match": "node scripts/test-level-match.mjs",

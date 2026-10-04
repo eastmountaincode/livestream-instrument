@@ -268,14 +268,29 @@ export function saveActiveStreams(ids: string[]): void {
   save(state);
 }
 
+// Performance-mode mixer edits are session-only; other preferences still save normally.
+let temporaryStreamSettings: Map<string, StreamSettings> | null = null;
+
+export function beginTemporaryStreamSettings(settings: Map<string, StreamSettings>): void {
+  temporaryStreamSettings = new Map(settings);
+}
+
+export function endTemporaryStreamSettings(): void {
+  temporaryStreamSettings = null;
+}
+
 export function saveStreamSettings(id: string, settings: StreamSettings): void {
+  if (temporaryStreamSettings) {
+    temporaryStreamSettings.set(id, { ...settings });
+    return;
+  }
   const state = getCurrent();
   state.streams[id] = settings;
   save(state);
 }
 
 export function getStreamSettings(id: string): StreamSettings | null {
-  return getCurrent().streams[id] ?? null;
+  return temporaryStreamSettings?.get(id) ?? getCurrent().streams[id] ?? null;
 }
 
 export function saveSoloId(soloId: string | null): void {

@@ -1,4 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { WorldTraveler } from './components/WorldTraveler';
+import { useWorldTraveler } from './hooks/useWorldTraveler';
+import { WORLD_TRAVELER_SOURCES } from './music/worldTraveler';
 import { StreamSelector } from './components/StreamSelector';
 import { SourceBackdrop } from './components/SourceBackdrop';
 import { Keyboard } from './components/Keyboard';
@@ -105,6 +108,8 @@ function App() {
     onConnected: () => { setLoading(false); },
     onDisconnected: handleStreamDisconnected,
   });
+  const traveler = useWorldTraveler({ sources: availableSources, wantedIds, activeIds, connect, disconnect });
+  const travelerMixerIds = useMemo(() => new Set(WORLD_TRAVELER_SOURCES.map(source => source.id)), []);
   const streamConnected = activeIds.size > 0;
 
   useEffect(() => {
@@ -186,10 +191,10 @@ function App() {
   }, [availableSources, connect, savedStateOnLoad, shouldStartDemo, sourcesReady, started]);
 
   useEffect(() => {
-    if (restoredStreamsRef.current) {
+    if (restoredStreamsRef.current && !traveler.enabled) {
       saveActiveStreams(Array.from(wantedIds));
     }
-  }, [wantedIds]);
+  }, [wantedIds, traveler.enabled]);
 
   useEffect(() => {
     saveSoloId(soloId);
@@ -264,7 +269,15 @@ function App() {
               className={shouldEqualizeTopPanels ? 'h-full' : ''}
               keepMounted
             >
-              <StreamSelector
+              <div className="grid gap-2">
+                <label className="flex items-center gap-2 font-mono text-[10px] font-semibold uppercase">
+                  <input type="checkbox" checked={traveler.enabled} disabled={!sourcesReady} onChange={traveler.toggle} />
+                  World Traveler
+                </label>
+                {traveler.enabled ? <WorldTraveler
+                  selectedId={traveler.selectedId} sources={availableSources} statuses={statuses}
+                  onSelect={traveler.select} onConnect={connect}
+                /> : <StreamSelector
                 sources={availableSources}
                 sourceLoadError={sourceLoadError}
                 sourcesReady={sourcesReady}
@@ -273,7 +286,8 @@ function App() {
                 statuses={statuses}
                 onConnect={connect}
                 onDisconnect={disconnect}
-              />
+              />}
+              </div>
             </Panel>
           </div>
 
@@ -293,20 +307,22 @@ function App() {
           title="Track Mixer"
           open={openPanels.mixer}
           onToggle={() => togglePanel('mixer')}
-          meta={`${activeIds.size} Tracks`}
+          meta={`${traveler.enabled ? WORLD_TRAVELER_SOURCES.length : activeIds.size} Tracks`}
         >
           <Controls
+            key={traveler.enabled ? 'traveler' : 'normal'}
+            numbered={traveler.enabled}
             filterQ={filterQ}
             onFilterQChange={updateFilterQ}
-            activeSourceIds={activeIds}
-            soloId={soloId}
-            onSoloChange={setSoloId}
+            activeSourceIds={traveler.enabled ? travelerMixerIds : activeIds}
+            soloId={traveler.enabled ? traveler.selectedId : soloId}
+            onSoloChange={traveler.enabled ? id => { if (id) traveler.select(id); } : setSoloId}
             sources={availableSources}
             keyboardVolume={keyboardVolume}
             chordPadVolume={chordPadVolume}
             onKeyboardVolumeChange={setKeyboardVolume}
             onChordPadVolumeChange={setChordPadVolume}
-            onRemoveSource={disconnect}
+            onRemoveSource={traveler.enabled ? undefined : disconnect}
           />
         </Panel>
 
@@ -319,6 +335,7 @@ function App() {
             keepMounted
           >
             <ChordPad
+              midiPadsEnabled={!traveler.enabled}
               streamConnected={streamConnected}
               inputVolume={chordPadVolume}
               autoPlayDefaultChord={shouldStartDemo}

@@ -55,6 +55,7 @@ interface Props {
   streamConnected: boolean;
   inputVolume: number;
   autoPlayDefaultChord?: boolean;
+  midiPadsEnabled?: boolean;
   onSelectionChange?: (chord: ChordSpec) => void;
   onPerformanceEvent?: (event: ChordPerformanceEvent) => void;
 }
@@ -63,6 +64,7 @@ export function ChordPad({
   streamConnected,
   inputVolume,
   autoPlayDefaultChord = false,
+  midiPadsEnabled = true,
   onSelectionChange,
   onPerformanceEvent,
 }: Props) {
@@ -319,6 +321,7 @@ export function ChordPad({
     if (!event.isPad) return;
     const padIndex = MPK_MINI_IV_PAD_INDEX.get(event.note);
     if (padIndex === undefined) return;
+    if (event.type === 'on' && !midiPadsEnabled) return;
     if (event.type === 'on' && editPad(padIndex)) return;
     // A cleared/reassigned slot must not swallow the release of a held pad.
     if (event.type === 'off' && !latched && activeMidiPadNoteRef.current === event.note) {
@@ -339,7 +342,7 @@ export function ChordPad({
       return;
     }
 
-  }), [chordBank, editPad, handleLatchedChordTrigger, latched, releaseAll, startChord]);
+  }), [chordBank, editPad, handleLatchedChordTrigger, latched, midiPadsEnabled, releaseAll, startChord]);
 
   const handleLatchToggle = () => {
     if (latched) {

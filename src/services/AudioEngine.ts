@@ -1191,6 +1191,15 @@ export class AudioEngine {
     return this.channels.get(id)?.muted ?? false;
   }
 
+  // Independent of solo: an unavailable selected destination must mean silence,
+  // never fall back to playing all eight sources.
+  private travelerSourceId: string | null = null;
+
+  setTravelerSource(id: string | null) {
+    this.travelerSourceId = id;
+    this.applyGains();
+  }
+
   private soloId: string | null = null;
 
   setStreamSolo(id: string | null) {
@@ -1206,9 +1215,16 @@ export class AudioEngine {
     const now = this.ctx.currentTime;
     const soloId = this.soloId && this.channels.has(this.soloId) ? this.soloId : null;
     for (const [id, ch] of this.channels) {
-      const audible = soloId ? id === soloId : !ch.muted;
-      ch.streamGain.gain.cancelScheduledValues(0);
-      ch.streamGain.gain.setTargetAtTime(audible ? ch.volume : 0, now, 0.01);
+      const traveling = this.travelerSourceId != null;
+      const audible = traveling ? id === this.travelerSourceId && !ch.muted : soloId ? id === soloId : !ch.muted;
+      const currentGain = ch.streamGain.gain.value;
+      ch.streamGain.gain.cancelScheduledValues(now);
+      ch.streamGain.gain.setValueAtTime(currentGain, now);
+      if (traveling && this.chordPadTight) {
+        ch.streamGain.gain.setValueAtTime(audible ? ch.volume : 0, now);
+      } else {
+        ch.streamGain.gain.setTargetAtTime(audible ? ch.volume : 0, now, 0.01);
+      }
     }
   }
 
