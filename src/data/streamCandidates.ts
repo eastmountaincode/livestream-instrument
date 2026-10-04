@@ -376,8 +376,8 @@ export const STREAM_CANDIDATE_SEEDS: StreamCandidate[] = ([
     pageUrl: 'https://locusonus.org/soundmap/',
     format: 'MP3 Icecast',
     source: 'Locus Sonus / CreaCast',
-    status: 'accepted',
-    notes: 'River-side microphone; likely useful for subtle moving water and birds.',
+    status: 'rejected',
+    notes: 'Inactive for performance: stream is not connecting reliably. River-side microphone; likely useful for subtle moving water and birds.',
   },
   {
     id: 'locus-dumfries-loch-patrick',
