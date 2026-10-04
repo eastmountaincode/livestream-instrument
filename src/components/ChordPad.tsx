@@ -383,7 +383,7 @@ export function ChordPad({
           type="button"
           className="ml-auto h-7 border-2 border-black bg-white px-2 font-mono text-[10px] font-black uppercase text-black hover:bg-black hover:text-white"
           onClick={handleBuildChordBank}
-          title="Build related chords with matching richness in major or natural minor. Pads 1 and 8 keep the selected chord."
+          title="Build eight chord variations from the selected chord."
         >
           Build Bank From Current
         </button>
