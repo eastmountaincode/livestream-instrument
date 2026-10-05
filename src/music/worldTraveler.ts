@@ -25,6 +25,8 @@ const PLACE_LABELS: Record<string, string> = {
   'locus-zurich-community-echo': 'Zurich',
   'locus-usti-nad-labem-duul': 'Czech Republic',
 };
+// Available for normal playback; keep the current fifteen performance keys unchanged.
+const LIVE_SOURCES_ONLY = new Set(['locus-hokkaido-maeyama']);
 const WHITE_KEY_OFFSETS = [0, 2, 4, 5, 7, 9, 11];
 const WHITE_KEY_NAMES = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
 export const TRAVELER_FIRST_NOTE = 48;
@@ -36,7 +38,7 @@ export function getTravelerSources(sources: LiveSource[]): TravelerSource[] {
   const byId = new Map(sources.map(source => [source.id, source]));
   const ordered = [
     ...WORLD_TRAVELER_SOURCES.flatMap(slot => byId.has(slot.id) ? [byId.get(slot.id)!] : []),
-    ...sources.filter(source => !originals.has(source.id)).sort((a, b) => a.id.localeCompare(b.id)),
+    ...sources.filter(source => !originals.has(source.id) && !LIVE_SOURCES_ONLY.has(source.id)).sort((a, b) => a.id.localeCompare(b.id)),
   ];
   return ordered.slice(0, TRAVELER_SOURCE_LIMIT).map((source, index) => {
     const keyIndex = index % WHITE_KEY_OFFSETS.length;
