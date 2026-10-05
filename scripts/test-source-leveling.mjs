@@ -11,7 +11,7 @@ const compile = path => ts.transpileModule(readFileSync(new URL(path, import.met
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
 }).outputText;
 const levelModule = url(compile('../src/services/sourceLeveling.ts'));
-const { createSourceLevelState, updateSourceLevel } = await import(levelModule);
+const { createSourceLevelState, updateSourceLevel, sourceLoudnessWeights, perceivedSourcePower } = await import(levelModule);
 const samples = amplitude => Float32Array.from({ length: 2048 }, (_, i) => amplitude * Math.sin(2 * Math.PI * i / 64));
 const db = gain => 20 * Math.log10(gain);
 function settle(amplitude, seconds = 24) {
@@ -58,6 +58,20 @@ assert.equal(narrow.gainDb, held, 'a missing raw input cannot cause background m
 assert.equal(narrow.signalSeconds, 0, 'dropouts require fresh input qualification');
 for (let i = 0; i < 3; i++) updateSourceLevel(narrow, samples(.8), .2, -38, { inputPower: .3 });
 assert.ok(db(.8 / Math.SQRT2) + narrow.gainDb < -23, 'a sudden loud return is cut even after large makeup');
+// Frequency weighting must reduce bass influence without weakening peak safety.
+const weights = sourceLoudnessWeights(48000, 48000);
+assert.ok(Math.abs(10 * Math.log10(weights[100]) + 19.1) < .2, '100 Hz has the expected perceptual attenuation');
+assert.ok(Math.abs(weights[1000] - 1) < .001, '1 kHz remains the calibration reference');
+const brightSpectrum = new Float32Array(24000).fill(-Infinity); brightSpectrum[1000] = -20;
+assert.ok(Math.abs(perceivedSourcePower(samples(.1), brightSpectrum, weights) - .005) < .00001);
+const bassSpectrum = new Float32Array(24000).fill(-Infinity); bassSpectrum[100] = -20;
+assert.ok(perceivedSourcePower(samples(.1), bassSpectrum, weights) < .00007,
+  'bass-heavy and midrange sources with equal RMS no longer look equally loud');
+const weightedPeak = createSourceLevelState();
+for (let i=0;i<100;i++) updateSourceLevel(weightedPeak, samples(.8), .2, -38,
+  { inputPower: .1, perceivedPower: 1e-12, background: true });
+assert.ok(.8 * 10 ** (weightedPeak.gainDb / 20) <= .12501,
+  'perceptual weighting cannot hide large unweighted peaks from the safety limit');
 console.log('Source level policy passed: baseline matching, fast attenuation, slow recovery, silence/DC/invalid data, and boost cap.');
 
 const output = url(compile('../src/services/audioOutput.ts'));
@@ -69,6 +83,17 @@ const { AudioEngine } = await import(url(compile('../src/services/AudioEngine.ts
   .replace("'./sourceLeveling'", JSON.stringify(levelModule))));
 class TestContext extends webAudioEngine.RenderingAudioContext {
   constructor() { super({ sampleRate: 48000, numberOfChannels: 2 }); }
+  createAnalyser() {
+    const analyser = super.createAnalyser();
+    const read = analyser.getFloatFrequencyData.bind(analyser);
+    analyser.getFloatFrequencyData = bins => {
+      read(bins);
+      // web-audio-engine reports exact FFT zeros as 0 dB, unlike browsers'
+      // -Infinity. All fixture inputs are sub-unity; these are silence bins.
+      for (let i=0;i<bins.length;i++) if (bins[i] === 0) bins[i] = -Infinity;
+    };
+    return analyser;
+  }
   createMediaElementSource(element) {
     element.paused ??= false;
     element.readyState ??= 4;
@@ -229,7 +254,7 @@ const many = new AudioEngine();
 many.setToneMode('bands'); many.setMasterVolume(.05); many.compressor.ratio.value = 1;
 many.setChordPadTight(true); many.setTravelerSource('0');
 for (let i = 0; i < 15; i++) {
-  many.addStream(String(i), { amplitude: .002 * 10 ** (-i / 20), frequency: 300 });
+  many.addStream(String(i), { amplitude: .004 * 10 ** (-i / 20), frequency: 300 });
   const ch = many.channels.get(String(i));
   const sink = many.ctx.createGain(); sink.gain.value = 0;
   ch.rawAnalyser.connect(sink); ch.sourceLevelAnalyser.connect(sink); sink.connect(many.ctx.destination);
@@ -251,7 +276,7 @@ for (let i = 0; i < 15; i++) {
   levels.push(db(Math.sqrt(data.reduce((sum, x) => sum + x*x, 0) / data.length)));
 }
 assert.ok(Math.min(...levels) > -70, 'all fifteen quiet extracted signals receive useful makeup');
-assert.ok(Math.max(...levels) - Math.min(...levels) < 1.5, 'fifteen sources match before audible settling');
+assert.ok(Math.max(...levels) - Math.min(...levels) < 1.5, `fifteen sources match before audible settling: ${JSON.stringify(levels)}; gains: ${JSON.stringify([...many.channels.values()].map(ch=>ch.sourceLevelState.gainDb))}`);
 console.log(`15-source narrow-band regression passed: ${ (Math.max(...levels)-Math.min(...levels)).toFixed(2) } dB spread; ${maxRendering} DSP branches.`);
 
 // Reference timbre changes must follow the audible gain without waiting for
@@ -291,3 +316,23 @@ for (const q of [1, 2, 10, 30, 100, 2, 95]) {
 }
 assert.ok(maxMeterError < .5, 'leveler measures the audible compensated window throughout a resonance sweep');
 console.log(`Resonance meter regression passed: ${maxMeterError.toFixed(2)} dB maximum tracking error.`);
+
+const perceived = new AudioEngine();
+perceived.setToneMode('bands'); perceived.setMasterVolume(.05); perceived.compressor.ratio.value = 1;
+perceived.setChordPadTight(true); perceived.setTravelerSource('bass');
+for (const [id, frequency] of [['bass', 165], ['mid', 660]]) {
+  perceived.addStream(id, { amplitude: .01, frequency });
+  const ch = perceived.channels.get(id), sink = perceived.ctx.createGain(); sink.gain.value = 0;
+  ch.rawAnalyser.connect(sink); ch.sourceLevelAnalyser.connect(sink); sink.connect(perceived.ctx.destination);
+  ch.limiter.ratio.value = 1; perceived.setStreamLevelMatch(id, false);
+}
+for(const note of [52,76]) perceived.noteOn(note,127,'chord-pad'); await Promise.resolve();
+for(let i=0;i<100;i++){perceived.ctx.processTo(perceived.ctx.currentTime+.2);perceived.updateSourceLevels();}
+function outputRms(){perceived.ctx.processTo(perceived.ctx.currentTime+.3);const a=perceived.ctx.exportAsAudioData().channelData[0].slice(-8192);return Math.sqrt(a.reduce((s,x)=>s+x*x,0)/a.length);}
+const bassRms=outputRms();perceived.setTravelerSource('mid');const midRms=outputRms();
+// IEC A response at 165 Hz is about -12.9 dB; 660 Hz about -1.7 dB.
+// The algorithm must raise the bass source instead of matching raw RMS again.
+const compensationDb=db(bassRms/midRms);
+assert.ok(compensationDb>9 && compensationDb<13,
+  `different source spectra receive perceptual correction, measured ${compensationDb} dB`);
+console.log(`Perceptual source regression passed: bass versus midrange correction ${compensationDb.toFixed(2)} dB.`);

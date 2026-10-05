@@ -1,4 +1,4 @@
-import { createSourceLevelState, updateSourceLevel, sourceLevelPower, DEFAULT_SOURCE_LEVEL_DB, type SourceLevelState } from './sourceLeveling';
+import { createSourceLevelState, updateSourceLevel, sourceLevelPower, perceivedSourcePower, sourceLoudnessWeights, DEFAULT_SOURCE_LOUDNESS_DB, type SourceLevelState } from './sourceLeveling';
 import { estimateResonanceLevelMatch, resonanceListeningTrim, type ResonanceBand } from './resonanceLevelMatch';
 import { createAudioOutputRouter } from "./audioOutputRouter";
 /**
@@ -123,6 +123,8 @@ interface StreamChannel {
   sourceLevelGain: GainNode;
   sourceLevelState: SourceLevelState;
   sourceLevelSamples: Float32Array<ArrayBuffer>;
+  sourceLevelSpectrum: Float32Array<ArrayBuffer>;
+  sourceLoudnessWeights: Float32Array<ArrayBuffer>;
   sourceInputSamples: Float32Array<ArrayBuffer>;
   sourceLevelUpdatedAt: number;
   sourceLevelAnalyser: AnalyserNode;
@@ -270,6 +272,7 @@ export class AudioEngine {
     sourceLevelLowPass.Q.value = 0.707;
     const sourceLevelAnalyser = this.ctx.createAnalyser();
     sourceLevelAnalyser.fftSize = 8192;
+    sourceLevelAnalyser.smoothingTimeConstant = 0;
     sourceLevelHighPass.connect(sourceLevelLowPass);
     const sourceLevelResonanceGain = this.ctx.createGain();
     sourceLevelLowPass.connect(sourceLevelResonanceGain);
@@ -375,6 +378,8 @@ export class AudioEngine {
       sourceLevelGain,
       sourceLevelState: createSourceLevelState(),
       sourceLevelSamples: new Float32Array(8192),
+      sourceLevelSpectrum: new Float32Array(4096),
+      sourceLoudnessWeights: sourceLoudnessWeights(this.ctx.sampleRate, 8192),
       sourceInputSamples: new Float32Array(8192),
       sourceLevelAnalyser,
       sourceLevelResonanceGain,
@@ -1306,7 +1311,7 @@ export class AudioEngine {
   // Independent of solo: an unavailable selected destination must mean silence,
   // never fall back to playing every source.
   private travelerSourceId: string | null = null;
-  private travelerLevelTargetDb: number | null = DEFAULT_SOURCE_LEVEL_DB;
+  private travelerLevelTargetDb: number | null = DEFAULT_SOURCE_LOUDNESS_DB;
   private travelerReference = new Map<string, { volume: number; power: number | null }>();
 
   private captureTravelerReference() {
@@ -1317,7 +1322,7 @@ export class AudioEngine {
         || ch.audioElement.readyState < 2) continue;
       this.travelerReference.set(id, { volume: ch.volume, power: null });
     }
-    this.travelerLevelTargetDb = this.travelerReference.size ? null : DEFAULT_SOURCE_LEVEL_DB;
+    this.travelerLevelTargetDb = this.travelerReference.size ? null : DEFAULT_SOURCE_LOUDNESS_DB;
     this.updateTravelerReference();
   }
 
@@ -1330,17 +1335,24 @@ export class AudioEngine {
         continue;
       }
       if ((reference.power != null && reference.power > 0) || !ch.rendering || !ch.activeVoices.size) continue;
-      ch.sourceLevelAnalyser.getFloatTimeDomainData(ch.sourceLevelSamples);
-      const power = sourceLevelPower(ch.sourceLevelSamples) * reference.volume ** 2;
+      const power = this.readSourceLoudness(ch) * reference.volume ** 2;
       // Never establish the show's listening level from an empty meter, a
       // release tail or a reconnect. Wait for an actual held chord instead.
-      reference.power = power > 1e-9 ? power : 0;
+      // Qualify real filtered signal before perceptual weighting or fader gain.
+      // Quiet bass should not lose its reference merely because it weights lower.
+      reference.power = sourceLevelPower(ch.sourceLevelSamples) > 1e-12 ? power : 0;
     }
     const references = [...this.travelerReference.values()];
     if (references.some(reference => reference.power == null)) return;
     // Environmental feeds are independent: combine their energy, not peaks.
     const power = references.reduce((sum, reference) => sum + (reference.power ?? 0), 0);
     if (power > 0) this.travelerLevelTargetDb = 10 * Math.log10(power / DEFAULT_VOL ** 2);
+  }
+
+  private readSourceLoudness(ch: StreamChannel): number {
+    ch.sourceLevelAnalyser.getFloatTimeDomainData(ch.sourceLevelSamples);
+    ch.sourceLevelAnalyser.getFloatFrequencyData(ch.sourceLevelSpectrum);
+    return perceivedSourcePower(ch.sourceLevelSamples, ch.sourceLevelSpectrum, ch.sourceLoudnessWeights);
   }
 
   private updateSourceLevels() {
@@ -1363,12 +1375,13 @@ export class AudioEngine {
         ch.sourceLevelState.signalSeconds = 0;
         continue; // A release or a pause must not make the next hit louder.
       }
-      ch.sourceLevelAnalyser.getFloatTimeDomainData(ch.sourceLevelSamples);
+      const perceivedPower = this.readSourceLoudness(ch);
       if (this.travelerLevelTargetDb == null) continue;
       const previousDb = ch.sourceLevelState.gainDb;
       ch.rawAnalyser.getFloatTimeDomainData(ch.sourceInputSamples);
       const gain = updateSourceLevel(ch.sourceLevelState, ch.sourceLevelSamples, elapsed, this.travelerLevelTargetDb, {
         inputPower: sourceLevelPower(ch.sourceInputSamples),
+        perceivedPower,
         background: !this.shouldAnalyzeChannel(ch),
       });
       if (ch.sourceLevelState.gainDb !== previousDb) {
