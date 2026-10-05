@@ -1,4 +1,4 @@
-import { createSourceLevelState, updateSourceLevel, type SourceLevelState } from './sourceLeveling';
+import { createSourceLevelState, updateSourceLevel, sourceLevelPower, DEFAULT_SOURCE_LEVEL_DB, type SourceLevelState } from './sourceLeveling';
 import { estimateResonanceLevelMatch, type ResonanceBand } from './resonanceLevelMatch';
 import { createAudioOutputRouter } from "./audioOutputRouter";
 /**
@@ -1273,10 +1273,47 @@ export class AudioEngine {
   // Independent of solo: an unavailable selected destination must mean silence,
   // never fall back to playing every source.
   private travelerSourceId: string | null = null;
+  private travelerLevelTargetDb: number | null = DEFAULT_SOURCE_LEVEL_DB;
+  private travelerReference = new Map<string, { volume: number; power: number | null }>();
+
+  private captureTravelerReference() {
+    this.travelerReference.clear();
+    const solo = this.soloId && this.channels.has(this.soloId) ? this.soloId : null;
+    for (const [id, ch] of this.channels) {
+      if ((solo ? id !== solo : ch.muted) || ch.volume <= 0 || ch.audioElement.paused
+        || ch.audioElement.readyState < 2) continue;
+      this.travelerReference.set(id, { volume: ch.volume, power: null });
+    }
+    this.travelerLevelTargetDb = this.travelerReference.size ? null : DEFAULT_SOURCE_LEVEL_DB;
+    this.updateTravelerReference();
+  }
+
+  private updateTravelerReference() {
+    if (this.travelerLevelTargetDb != null) return;
+    for (const [id, reference] of this.travelerReference) {
+      const ch = this.channels.get(id);
+      if (!ch || ch.audioElement.paused || ch.audioElement.readyState < 2) {
+        reference.power = 0;
+        continue;
+      }
+      if ((reference.power != null && reference.power > 0) || !ch.rendering || !ch.activeVoices.size) continue;
+      ch.sourceLevelAnalyser.getFloatTimeDomainData(ch.sourceLevelSamples);
+      const power = sourceLevelPower(ch.sourceLevelSamples) * (ch.levelMatchGain.gain.value * reference.volume) ** 2;
+      // Never establish the show's listening level from an empty meter, a
+      // release tail or a reconnect. Wait for an actual held chord instead.
+      reference.power = power > 1e-9 ? power : 0;
+    }
+    const references = [...this.travelerReference.values()];
+    if (references.some(reference => reference.power == null)) return;
+    // Environmental feeds are independent: combine their energy, not peaks.
+    const power = references.reduce((sum, reference) => sum + (reference.power ?? 0), 0);
+    if (power > 0) this.travelerLevelTargetDb = 10 * Math.log10(power / DEFAULT_VOL ** 2);
+  }
 
   private updateSourceLevels() {
     if (this.travelerSourceId == null) return;
     const now = this.ctx.currentTime;
+    this.updateTravelerReference();
     // Measure only branches that actually rendered during the previous tick.
     // All media stay connected; only one silent destination warms at a time.
     for (const ch of this.channels.values()) {
@@ -1302,8 +1339,9 @@ export class AudioEngine {
       // Include the existing resonance compensation, without any user gain.
       const resonanceGain = ch.levelMatchGain.gain.value;
       for (let i = 0; i < ch.sourceLevelSamples.length; i++) ch.sourceLevelSamples[i] *= resonanceGain;
+      if (this.travelerLevelTargetDb == null) continue;
       const previousDb = ch.sourceLevelState.gainDb;
-      const gain = updateSourceLevel(ch.sourceLevelState, ch.sourceLevelSamples, elapsed);
+      const gain = updateSourceLevel(ch.sourceLevelState, ch.sourceLevelSamples, elapsed, this.travelerLevelTargetDb);
       if (ch.sourceLevelState.gainDb !== previousDb) {
         ch.sourceLevelGain.gain.setTargetAtTime(gain, now, gain < ch.sourceLevelGain.gain.value ? 0.03 : 0.15);
       }
@@ -1349,7 +1387,12 @@ export class AudioEngine {
     for (const ch of this.channels.values()) {
       ch.sourceLevelState = createSourceLevelState();
       ch.sourceLevelUpdatedAt = this.ctx.currentTime;
-      ch.sourceLevelGain.gain.setTargetAtTime(1, this.ctx.currentTime, 0.05);
+      // The Traveler gate uses DEFAULT_VOL. Compensate immediately for the
+      // existing fader so entering the mode cannot change this source's level.
+      const gain = enabled ? ch.volume / DEFAULT_VOL : 1;
+      ch.sourceLevelState.gainDb = 20 * Math.log10(Math.max(1e-6, gain));
+      ch.sourceLevelGain.gain.cancelScheduledValues(this.ctx.currentTime);
+      ch.sourceLevelGain.gain.setValueAtTime(gain, this.ctx.currentTime);
     }
     if (enabled) this.sourceLevelTimer = window.setInterval(() => this.updateSourceLevels(), 200);
   }
@@ -1362,6 +1405,7 @@ export class AudioEngine {
     if (this.travelerSourceId === id) return;
     const previous = this.travelerSourceId == null ? null : this.channels.get(this.travelerSourceId);
     const wasTraveling = this.travelerSourceId != null;
+    if (!wasTraveling && id != null) this.captureTravelerReference();
     this.travelerSourceId = id;
     if (wasTraveling !== (id != null)) this.setSourceLeveling(id != null);
     // Keep the previous source connected for its existing soft release. The
@@ -1376,7 +1420,7 @@ export class AudioEngine {
     for (const ch of this.channels.values()) {
       if (this.shouldAnalyzeChannel(ch)) this.updateLevelMatch(ch);
     }
-    this.applyGains();
+    this.applyGains(wasTraveling !== (id != null));
   }
 
   private soloId: string | null = null;
@@ -1390,7 +1434,7 @@ export class AudioEngine {
     return this.soloId;
   }
 
-  private applyGains() {
+  private applyGains(immediate = false) {
     const now = this.ctx.currentTime;
     const soloId = this.soloId && this.channels.has(this.soloId) ? this.soloId : null;
     for (const [id, ch] of this.channels) {
@@ -1400,7 +1444,7 @@ export class AudioEngine {
       const currentGain = ch.streamGain.gain.value;
       ch.streamGain.gain.cancelScheduledValues(now);
       ch.streamGain.gain.setValueAtTime(currentGain, now);
-      if (traveling && this.chordPadTight) {
+      if (immediate || (traveling && this.chordPadTight)) {
         ch.streamGain.gain.setValueAtTime(audible ? volume : 0, now);
       } else {
         ch.streamGain.gain.setTargetAtTime(audible ? volume : 0, now, 0.01);

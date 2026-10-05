@@ -58,7 +58,7 @@ class TestContext extends webAudioEngine.RenderingAudioContext {
     const source = this.createBufferSource();
     source.buffer = this.createBuffer(1, 48000, 48000);
     const data = source.buffer.getChannelData(0);
-    for (let i = 0; i < data.length; i++) data[i] = element.amplitude * Math.sin(2 * Math.PI * 440 * i / 48000)
+    for (let i = 0; i < data.length; i++) data[i] = element.amplitude * Math.sin(2 * Math.PI * 440 * i / 48000 + (element.phase ?? 0))
       + (element.rumble ?? 0) * Math.sin(2 * Math.PI * 20 * i / 48000);
     source.loop = true; source.start(); return source;
   }
@@ -82,14 +82,14 @@ for (const id of ['quiet', 'loud']) {
 engine.setChordPadTight(true); engine.setTravelerSource('quiet');
 const levelTimerCount = intervals.size;
 engine.ctx.processTo(.4); engine.updateSourceLevels();
-assert.equal(engine.channels.get('quiet').sourceLevelState.gainDb, 0, 'no held notes means no calibration or boost');
+assert.equal(engine.channels.get('quiet').sourceLevelState.gainDb, db(.3 / .8), 'no held notes preserves the normal fader level without calibration or boost');
 engine.noteOn(69, 100, 'chord-pad');
 await Promise.resolve();
 for (let i = 0; i < 120; i++) {
   engine.ctx.processTo(engine.ctx.currentTime + .2);
   engine.updateSourceLevels();
 }
-assert.ok(engine.channels.get('loud').sourceLevelGain.gain.value < .5, 'unselected destination is calibrated with the held chord');
+assert.ok(engine.channels.get('loud').sourceLevelGain.gain.value < 3 / .8, 'unselected destination is calibrated with the held chord');
 function rms() {
   engine.ctx.processTo(engine.ctx.currentTime + .3);
   const data = engine.ctx.exportAsAudioData().channelData[0].slice(-4096);
@@ -148,3 +148,57 @@ colored.ctx.processTo(colored.ctx.currentTime + .4); colored.updateSourceLevels(
 assert.equal(colored.channels.get('clear').sourceLevelState.gainDb, gainBeforePause, 'paused media never increases gain');
 assert.equal(colored.channels.get('clear').sourceLevelState.signalSeconds, 0, 'resume must qualify the signal again');
 console.log(`Different-spectrum regression passed: rumble-heavy versus clear source difference ${db(rumbleLevel / clearLevel).toFixed(2)} dB.`);
+
+// Regression: entering Traveler must inherit a quiet normal mix, not climb
+// toward the old fixed -38 dB reference. Exercise low and high saved faders.
+for (const secondVolume of [0, .0258, 2.58]) {
+  const transition = new AudioEngine();
+  transition.setToneMode('bands'); transition.setMasterVolume(1);
+  transition.compressor.ratio.value = 1;
+  transition.addStream('california', { amplitude: .0007 });
+  transition.addStream('other', { amplitude: .0004, phase: Math.PI / 2 });
+  transition.setStreamVolume('california', .99);
+  transition.setStreamVolume('other', secondVolume);
+  for (const ch of transition.channels.values()) {
+    const sink = transition.ctx.createGain(); sink.gain.value = 0;
+    ch.sourceLevelAnalyser.connect(sink); sink.connect(transition.ctx.destination);
+    ch.limiter.ratio.value = 1;
+  }
+  transition.noteOn(69, 254, 'chord-pad'); await Promise.resolve();
+  function level(seconds = .2) {
+    transition.ctx.processTo(transition.ctx.currentTime + seconds);
+    const data = transition.ctx.exportAsAudioData().channelData[0].slice(-2048);
+    return Math.sqrt(data.reduce((sum, x) => sum + x*x, 0) / data.length);
+  }
+  const normalLevel = level(2);
+  transition.setTravelerSource('california');
+  let maximum = 0, final = 0;
+  for (let i = 0; i < 100; i++) {
+    final = level(); maximum = Math.max(maximum, final);
+    transition.updateSourceLevels();
+  }
+  assert.ok(db(maximum / normalLevel) < 1, 'entering Traveler never balloons above the normal mix');
+  assert.ok(Math.abs(db(final / normalLevel)) < 1, 'Traveler converges to the chosen normal listening level');
+  transition.setTravelerSource(null);
+  const returned = level();
+  assert.ok(Math.abs(db(returned / normalLevel)) < .2, 'leaving Traveler restores the same normal level');
+  assert.equal(transition.getStreamVolume('california'), .99);
+  assert.equal(transition.getStreamVolume('other'), secondVolume);
+  console.log(`Mode transition passed: second fader ${secondVolume}, peak change ${db(maximum / normalLevel).toFixed(2)} dB, final change ${db(final / normalLevel).toFixed(2)} dB.`);
+}
+
+const deferred = new AudioEngine();
+deferred.setToneMode('bands');
+deferred.addStream('ready', { amplitude: .001 });
+deferred.addStream('lost', { amplitude: .001 });
+for (const ch of deferred.channels.values()) {
+  const sink = deferred.ctx.createGain(); sink.gain.value = 0;
+  ch.sourceLevelAnalyser.connect(sink); sink.connect(deferred.ctx.destination);
+}
+deferred.setTravelerSource('ready');
+assert.equal(deferred.travelerLevelTargetDb, null, 'entering without a chord waits for useful reference audio');
+deferred.channels.get('lost').audioElement.paused = true;
+deferred.noteOn(69, 127, 'chord-pad'); await Promise.resolve();
+deferred.ctx.processTo(1); deferred.updateSourceLevels();
+assert.ok(Number.isFinite(deferred.travelerLevelTargetDb), 'a lost reference stream does not block calibration from the audible normal mix');
+console.log('Deferred entry passed: no chord waits; unavailable reference cannot block leveling.');
