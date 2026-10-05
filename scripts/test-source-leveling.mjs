@@ -53,6 +53,8 @@ const { AudioEngine } = await import(url(compile('../src/services/AudioEngine.ts
 class TestContext extends webAudioEngine.RenderingAudioContext {
   constructor() { super({ sampleRate: 48000, numberOfChannels: 2 }); }
   createMediaElementSource(element) {
+    element.paused ??= false;
+    element.readyState ??= 4;
     const source = this.createBufferSource();
     source.buffer = this.createBuffer(1, 48000, 48000);
     const data = source.buffer.getChannelData(0);

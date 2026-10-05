@@ -138,6 +138,7 @@ interface StreamChannel {
   audioElement: HTMLAudioElement;
   voices: Voice[];
   activeVoices: Map<number, Voice>;
+  rendering: boolean;
   filterQ: number;
   volume: number;
   highPassFreq: number;
@@ -171,6 +172,7 @@ export class AudioEngine {
   private analysisTimer: number | null = null;
   private sourceLevelTimer: number | null = null;
   private sourceLevelBackgroundIndex = 0;
+  private sourceLevelBackground: StreamChannel | null = null;
   private keepAliveOscillator: OscillatorNode | null = null;
   private keepAliveGain: GainNode | null = null;
 
@@ -382,6 +384,7 @@ export class AudioEngine {
       audioElement,
       voices,
       activeVoices: new Map(),
+      rendering: true,
       filterQ: this.filterQ,
       volume: DEFAULT_VOL,
       highPassFreq: DEFAULT_HIGH_PASS_FREQ,
@@ -398,6 +401,8 @@ export class AudioEngine {
         this.noteOnForChannel(newChannel, note, this.getEffectiveVelocity(note));
       }
     }
+
+    this.syncChannelRendering();
 
     // A newly added channel must immediately respect any existing solo/mute
     // routing instead of becoming briefly audible at its default gain.
@@ -1272,19 +1277,10 @@ export class AudioEngine {
   private updateSourceLevels() {
     if (this.travelerSourceId == null) return;
     const now = this.ctx.currentTime;
-    // Warm one unselected destination per tick, rather than recalculating all
-    // fifteen during every mod-wheel event. Its meter must hear the same tone
-    // and resonance compensation it will have when the source is selected.
-    const background = [...this.channels.values()].filter(ch => !this.shouldAnalyzeChannel(ch)
-      && ch.activeVoices.size && !ch.audioElement.paused && ch.audioElement.readyState >= 2);
-    if (background.length) {
-      const ch = background[this.sourceLevelBackgroundIndex++ % background.length];
-      if (ch.levelMatchPending) this.applyChannelFilterQ(ch, true);
-      this.updateHarmonicEvidenceVoicesForChannel(ch, true);
-      this.updateSpectralSnapVoicesForChannel(ch, 0.05, true);
-      if (ch.levelMatchPending) this.updateLevelMatch(ch, true);
-    }
+    // Measure only branches that actually rendered during the previous tick.
+    // All media stay connected; only one silent destination warms at a time.
     for (const ch of this.channels.values()) {
+      if (!ch.rendering) continue;
       const elapsed = now - ch.sourceLevelUpdatedAt;
       ch.sourceLevelUpdatedAt = now;
       if (elapsed <= 0) continue;
@@ -1312,12 +1308,44 @@ export class AudioEngine {
         ch.sourceLevelGain.gain.setTargetAtTime(gain, now, gain < ch.sourceLevelGain.gain.value ? 0.03 : 0.15);
       }
     }
+    const background = [...this.channels.values()].filter(ch => !this.shouldAnalyzeChannel(ch)
+      && ch.activeVoices.size && !ch.audioElement.paused && ch.audioElement.readyState >= 2);
+    this.sourceLevelBackground = background.length
+      ? background[this.sourceLevelBackgroundIndex++ % background.length] : null;
+    const next = this.sourceLevelBackground;
+    if (next) {
+      if (next.levelMatchPending) this.applyChannelFilterQ(next, true);
+      this.updateHarmonicEvidenceVoicesForChannel(next, true);
+      this.updateSpectralSnapVoicesForChannel(next, 0.05, true);
+      if (next.levelMatchPending) this.updateLevelMatch(next, true);
+    }
+    this.syncChannelRendering();
+  }
+
+  private syncChannelRendering() {
+    for (const ch of this.channels.values()) {
+      const rendering = this.shouldAnalyzeChannel(ch) || ch === this.sourceLevelBackground;
+      if (ch.rendering === rendering) continue;
+      // Disconnect both audible and measurement branches. Merely setting the
+      // stream gate to zero leaves every resonator processing at audio rate.
+      for (const voice of ch.voices) {
+        if (rendering) {
+          voice.gain.connect(ch.levelMatchGain);
+          voice.levelReferenceGain.connect(ch.sourceLevelHighPass);
+        } else {
+          voice.gain.disconnect(ch.levelMatchGain);
+          voice.levelReferenceGain.disconnect(ch.sourceLevelHighPass);
+        }
+      }
+      ch.rendering = rendering;
+    }
   }
 
   private setSourceLeveling(enabled: boolean) {
     if (this.sourceLevelTimer != null) window.clearInterval(this.sourceLevelTimer);
     this.sourceLevelTimer = null;
     this.sourceLevelBackgroundIndex = 0;
+    this.sourceLevelBackground = null;
     for (const ch of this.channels.values()) {
       ch.sourceLevelState = createSourceLevelState();
       ch.sourceLevelUpdatedAt = this.ctx.currentTime;
@@ -1332,11 +1360,15 @@ export class AudioEngine {
 
   setTravelerSource(id: string | null) {
     if (this.travelerSourceId === id) return;
+    const previous = this.travelerSourceId == null ? null : this.channels.get(this.travelerSourceId);
     const wasTraveling = this.travelerSourceId != null;
     this.travelerSourceId = id;
     if (wasTraveling !== (id != null)) this.setSourceLeveling(id != null);
-    // Keep every stream and voice warm, but defer expensive spectrum work on
-    // silent destinations. Refresh the destination before opening its gate.
+    // Keep the previous source connected for its existing soft release. The
+    // next metering tick parks it; Tight still closes its gate immediately.
+    if (wasTraveling && id != null) this.sourceLevelBackground = previous ?? null;
+    this.syncChannelRendering();
+    // Refresh the selected destination before opening its gate.
     for (const ch of this.channels.values()) {
       if (this.shouldAnalyzeChannel(ch)) this.applyChannelFilterQ(ch, true);
     }

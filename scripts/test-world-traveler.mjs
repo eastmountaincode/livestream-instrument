@@ -25,7 +25,9 @@ const react = {
 };
 class TestAudioContext extends webAudioEngine.RenderingAudioContext {
   constructor() { super({ sampleRate: 48000, numberOfChannels: 2 }); }
-  createMediaElementSource() {
+  createMediaElementSource(element) {
+    element.paused ??= false;
+    element.readyState ??= 4;
     const source = this.createBufferSource();
     source.buffer = this.createBuffer(1, 128, this.sampleRate);
     source.buffer.getChannelData(0).fill(.01);
@@ -158,5 +160,25 @@ assert.ok([...spectrumReads.keys()].every(id => id === slots[1].id), 'periodic a
 spectrumReads.clear();
 engine.setTravelerSource(null);
 assert.equal(spectrumReads.size, 15, 'leaving Traveler restores analysis for every normal track');
+// Muting a stream is insufficient: its resonators and level-reference branch
+// must stop rendering, while media connections and held notes remain intact.
+engine.setTravelerSource(slots[0].id);
+const warmed = new Set();
+for (let tick = 0; tick < 30; tick++) {
+  engine.ctx.processTo(engine.ctx.currentTime + .2);
+  engine.updateSourceLevels();
+  const rendering = [...engine.channels].filter(([, ch]) => ch.rendering);
+  assert.ok(rendering.length <= 2, 'only selected and one calibration source render chords');
+  assert.ok(engine.channels.get(slots[0].id).rendering, 'selected source always renders');
+  for (const [id] of rendering) warmed.add(id);
+}
+assert.equal(warmed.size, 15, 'background calibration visits every destination');
+for (const slot of slots) {
+  engine.setTravelerSource(slot.id);
+  assert.ok(engine.channels.get(slot.id).rendering, 'source switching immediately restores processing');
+  assert.ok(engine.channels.get(slot.id).activeVoices.size > 0, 'parking retains held chord voices');
+}
+engine.setTravelerSource(null);
+assert.ok([...engine.channels.values()].every(ch => ch.rendering), 'normal mode restores all source processing');
 for (const cleanup of cleanups) cleanup();
 console.log('World Traveler checks passed: fixed mappings, all fifteen connections, tight/soft switching, silent outages, reconnect, held chords, session-only edits, restoration, repeated transitions.');
