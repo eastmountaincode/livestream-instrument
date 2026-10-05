@@ -13,17 +13,17 @@ export const WORLD_TRAVELER_SOURCES = [
 ] as const;
 
 const PLACE_LABELS: Record<string, string> = {
-  'orca-port-townsend': 'Port Townsend',
+  'orca-port-townsend': 'Washington',
   'orca-sunset-bay': 'San Juan Islands',
   'wavefarm-pond-station-daytime': 'New York Pond',
-  'locus-r-urban-poplar': 'London Poplar',
+  'locus-r-urban-poplar': 'London',
   'locus-blickling-river-bure': 'Norfolk',
   'locus-zwolle-langenholte': 'Netherlands',
   'locus-zwolle-nature-reserve-langenholte': 'Netherlands Reserve',
-  'locus-brno-luzanky': 'Brno',
+  'locus-brno-luzanky': 'Czech Republic',
   'locus-flucc-wien': 'Vienna',
   'locus-zurich-community-echo': 'Zurich',
-  'locus-usti-nad-labem-duul': 'Ústí nad Labem',
+  'locus-usti-nad-labem-duul': 'Czech Republic',
 };
 const WHITE_KEY_OFFSETS = [0, 2, 4, 5, 7, 9, 11];
 const WHITE_KEY_NAMES = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
