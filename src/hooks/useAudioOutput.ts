@@ -40,7 +40,7 @@ function subscribeToOutputSupport() {
 }
 
 export function useAudioOutput(
-  applyOutput: (deviceId: string) => Promise<void>,
+  applyOutput: (deviceId: string, channel?: AudioOutputChannel) => Promise<void>,
   applyChannel: (channel: AudioOutputChannel) => void | Promise<void>,
 ) {
   const pending = useRef(Promise.resolve());
@@ -76,8 +76,8 @@ export function useAudioOutput(
       channelRef.current = storedChannel;
       setOutputs((current) => includeSelectedOutput(current, stored));
       try {
-        await applyOutput(stored.deviceId);
-        if (active) await applyChannel(storedChannel);
+        await applyOutput(stored.deviceId, storedChannel);
+        await applyChannel(storedChannel);
       } catch (selectionError) {
         if (active) setError(outputSelectionError(selectionError));
       }
@@ -90,25 +90,32 @@ export function useAudioOutput(
 
   useEffect(() => {
     if (!supported || !selected.deviceId) return;
+    let active = true;
     const checkDevice = () => {
       void enqueue(async () => {
+        if (!active) return;
         const devices = await navigator.mediaDevices.enumerateDevices();
+        if (!active) return;
         if (devices.some((device) => device.kind === "audiooutput" && device.deviceId === selected.deviceId)) return;
         try {
-          await applyOutput(selected.deviceId);
+          await applyOutput(selected.deviceId, channelRef.current);
+          await applyChannel(channelRef.current);
+          if (active) setError(null);
         } catch {
-          // The engine disconnects its output before attempting the missing sink.
+          if (active) setError("Output unavailable. Choose an audio device to resume.");
         }
-        setError("Output unavailable. Choose an audio device to resume.");
       }).catch((error) => setError(outputSelectionError(error)));
     };
     navigator.mediaDevices.addEventListener("devicechange", checkDevice);
-    return () => navigator.mediaDevices.removeEventListener("devicechange", checkDevice);
-  }, [applyOutput, enqueue, selected.deviceId, supported]);
+    return () => {
+      active = false;
+      navigator.mediaDevices.removeEventListener("devicechange", checkDevice);
+    };
+  }, [applyChannel, applyOutput, enqueue, selected.deviceId, supported]);
 
   const commitOutput = useCallback(
     (output: AudioOutputDevice) => enqueue(async () => {
-      await applyOutput(output.deviceId);
+      await applyOutput(output.deviceId, channelRef.current);
       setSelected(output);
       setOutputs((current) => includeSelectedOutput(current, output));
       writeAudioOutputPreference(window.localStorage, output);

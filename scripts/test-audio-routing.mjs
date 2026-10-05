@@ -205,7 +205,7 @@ function check(value, message) {
       "fallback leaked",
     );
   });
-  await test("device switch remains muted until pair is reapplied; late sink event is safe", async () => {
+  await test("device switch restores its pair atomically; late sink event is safe", async () => {
     const ctx = new OfflineAudioContext(16, 512, 48000),
       r = createAudioOutputRouter(ctx),
       s = ctx.createConstantSource();
@@ -216,8 +216,7 @@ function check(value, message) {
     s.offset.value = 0.125;
     s.connect(r.input);
     r.setChannel("pair-3");
-    await r.setDevice("blackhole");
-    r.setChannel("pair-3");
+    await r.setDevice("blackhole", "pair-3");
     ctx.dispatchEvent({ type: "sinkchange" });
     // web-audio-engine caches destination buffers at construction. Refresh the
     // cache after changing width; native AudioContext sink negotiation is still
@@ -235,6 +234,74 @@ function check(value, message) {
           ),
         `wrong switch mapping ch ${ch}: ${b.getChannelData(ch)[0]}, width ${ctx.destination.channelCount}, max ${ctx.destination.maxChannelCount}`,
       );
+  });
+  const renderRouter = async (ctx, router) => {
+    const source = ctx.createConstantSource(); source.offset.value = .125;
+    source.connect(router.input); source.start();
+    // Restore the software renderer's fixed output width after sink negotiation.
+    ctx.destination.channelCount = ctx._numberOfChannels;
+    ctx.destination._impl._destinationChannelData = ctx.destination._impl.inputs[0].bus.getChannelData();
+    return ctx.startRendering();
+  };
+  const assertPair = (buffer, start) => {
+    for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+      check(buffer.getChannelData(ch).every(x => Math.abs(x - (ch === start || ch === start + 1 ? .125 : 0)) < 1e-6), `unexpected channel ${ch + 1}`);
+    }
+  };
+  await test("successful device recovery never leaves a disconnected graph", async () => {
+    const ctx = new OfflineAudioContext(16, 512, 48000), r = createAudioOutputRouter(ctx);
+    ctx.setSinkId = async id => { ctx.sinkId = id; };
+    // No separate setChannel callback or sinkchange event after this promise.
+    await r.setDevice('blackhole', 'pair-3');
+    assertPair(await renderRouter(ctx, r), 2);
+  });
+  await test("returning sink restores sound after transient loss", async () => {
+    const ctx = new OfflineAudioContext(16, 512, 48000), r = createAudioOutputRouter(ctx);
+    ctx.setSinkId = async id => { ctx.sinkId = id; };
+    await r.setDevice('blackhole', 'pair-3'); r.setChannel('pair-3');
+    ctx.sinkId = { type: 'none' }; ctx.dispatchEvent({ type: 'sinkchange' });
+    ctx.sinkId = 'blackhole'; ctx.dispatchEvent({ type: 'sinkchange' });
+    assertPair(await renderRouter(ctx, r), 2);
+  });
+  await test("watchdog recovery reconnects only the chosen sink and deduplicates requests", async () => {
+    const ctx = new OfflineAudioContext(16, 512, 48000), r = createAudioOutputRouter(ctx);
+    const requested = [];
+    ctx.setSinkId = async id => { requested.push(id); ctx.sinkId = id; };
+    await r.setDevice('blackhole', 'pair-3');
+    ctx.sinkId = ''; ctx.dispatchEvent({ type: 'sinkchange' });
+    await Promise.all(Array.from({ length: 15 }, () => r.recover()));
+    check(requested.length === 2 && requested.every(id => id === 'blackhole'), 'retried too often or chose a fallback');
+    assertPair(await renderRouter(ctx, r), 2);
+  });
+  await test("system default reconnects after a temporary silent sink", async () => {
+    const ctx = new OfflineAudioContext(2, 512, 48000), r = createAudioOutputRouter(ctx);
+    ctx.setSinkId = async id => { ctx.sinkId = id; };
+    await r.setDevice('', 'stereo');
+    ctx.sinkId = { type: 'none' }; ctx.dispatchEvent({ type: 'sinkchange' });
+    await r.recover();
+    assertPair(await renderRouter(ctx, r), 0);
+  });
+  await test("absent device stays muted during automatic recovery", async () => {
+    const ctx = new OfflineAudioContext(16, 512, 48000), r = createAudioOutputRouter(ctx);
+    ctx.setSinkId = async id => { ctx.sinkId = id; };
+    await r.setDevice('blackhole', 'pair-3');
+    ctx.sinkId = ''; ctx.dispatchEvent({ type: 'sinkchange' });
+    ctx.setSinkId = async () => { throw Error('Missing'); };
+    await r.recover().catch(() => undefined);
+    const b = await renderRouter(ctx, r);
+    check(b.getChannelData(0).every(x => x === 0), 'recovery leaked into default output');
+    check(!r.getStatus().connected, 'reported a nonexistent connection');
+  });
+  await test("later user choice wins over queued recovery", async () => {
+    const ctx = new OfflineAudioContext(16, 512, 48000), r = createAudioOutputRouter(ctx);
+    const requested = [];
+    ctx.setSinkId = async id => { requested.push(id); ctx.sinkId = id; };
+    await r.setDevice('blackhole', 'pair-3');
+    ctx.sinkId = ''; ctx.dispatchEvent({ type: 'sinkchange' });
+    const recovery = r.recover(); const selection = r.setDevice('other', 'pair-5');
+    await Promise.all([recovery, selection]);
+    check(ctx.sinkId === 'other' && requested.at(-1) === 'other', 'recovery overrode user selection');
+    assertPair(await renderRouter(ctx, r), 4);
   });
   await test("failed sink cannot be unmuted by changing pair", async () => {
     const ctx = new OfflineAudioContext(16, 512, 48000),

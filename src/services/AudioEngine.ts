@@ -193,10 +193,16 @@ export class AudioEngine {
     this.masterGain.connect(this.compressor);
     this.compressor.connect(this.analyser);
     this.analyser.connect(this.outputRouter.input);
+    let lastContextState = this.ctx.state;
+    this.ctx.addEventListener('statechange', () => {
+      if (this.ctx.state === lastContextState) return;
+      lastContextState = this.ctx.state;
+      if (lastContextState !== 'running') console.warn('[Cicada audio context]', lastContextState);
+    });
   }
 
-  setOutputDevice(deviceId: string) {
-    return this.outputRouter.setDevice(deviceId);
+  setOutputDevice(deviceId: string, channel?: AudioOutputChannel) {
+    return this.outputRouter.setDevice(deviceId, channel);
   }
 
   setOutputChannel(channel: AudioOutputChannel) {
@@ -1486,7 +1492,7 @@ export class AudioEngine {
 
   resume() {
     this.ensureKeepAlive();
-    return this.ctx.resume();
+    return this.ctx.resume().then(() => this.outputRouter.recover());
   }
 }
 

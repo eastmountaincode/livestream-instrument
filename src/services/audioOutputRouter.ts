@@ -23,10 +23,24 @@ export function createAudioOutputRouter(context: BaseAudioContext) {
   let selected: AudioOutputChannel = "stereo";
   let changingDevice = false;
   let deviceReady = true;
+  let connected = false;
+  let recoverable = false;
+  let disposed = false;
+  let deviceOperation: Promise<void> = Promise.resolve();
+  let recovery: Promise<void> | null = null;
+  let lastRecoveryAt = -Infinity;
+  let fault: string | null = null;
+  const reportFault = (reason: string | null) => {
+    if (fault === reason) return;
+    fault = reason;
+    if (reason) console.warn('[Cicada audio output]', reason);
+    else console.info('[Cicada audio output] Connection restored');
+  };
   let expectedSinkId =
     (context as AudioContext & { sinkId?: string }).sinkId ?? "";
 
   const mute = () => {
+    connected = false;
     input.disconnect();
     panner.disconnect();
     splitter.disconnect();
@@ -37,7 +51,7 @@ export function createAudioOutputRouter(context: BaseAudioContext) {
   const setChannel = (channel: AudioOutputChannel) => {
     selected = channel;
     mute();
-    if (!deviceReady)
+    if (!deviceReady || disposed)
       throw new Error("Output muted: choose an available audio device first.");
     const [left, right] = outputChannelIndices(channel);
     const destination = context.destination;
@@ -70,42 +84,77 @@ export function createAudioOutputRouter(context: BaseAudioContext) {
       splitter.connect(merger, 0, left);
       splitter.connect(merger, 1, right);
       merger.connect(destination);
+      connected = true;
+      recoverable = false;
+      reportFault(null);
     } catch (error) {
       mute();
       throw error;
     }
   };
 
-  const setDevice = async (deviceId: string) => {
-    mute();
-    changingDevice = true;
-    deviceReady = false;
-    try {
-      // A previous 16-channel destination cannot be carried to a stereo sink.
-      context.destination.channelCount = 2;
-      await setAudioContextOutput(context as AudioContext, deviceId);
+  // Device and pair are one transaction. A successful sink change must never
+  // leave the graph disconnected awaiting a component's later callback.
+  const setDevice = (deviceId: string, channel: AudioOutputChannel = selected): Promise<void> => {
+    const operation = deviceOperation.then(async () => {
+      if (disposed) return;
+      mute();
+      selected = channel;
+      changingDevice = true;
+      deviceReady = false;
+      recoverable = false;
       expectedSinkId = deviceId;
-      deviceReady = true;
-      // The caller reapplies its selected pair only after the sink has changed.
-    } finally {
-      changingDevice = false;
-    }
+      try {
+        // A previous 16-channel destination cannot be carried to a stereo sink.
+        context.destination.channelCount = 2;
+        await setAudioContextOutput(context as AudioContext, deviceId);
+        if (disposed) return;
+        deviceReady = true;
+        setChannel(channel);
+      } catch (error) {
+        reportFault(error instanceof Error ? error.message : 'Device connection failed');
+        throw error;
+      } finally {
+        changingDevice = false;
+      }
+    });
+    deviceOperation = operation.catch(() => undefined);
+    return operation;
+  };
+
+  // Called by the existing playback recovery signals/watchdog. Only reconnect
+  // the explicitly chosen sink and pair; never fall back to another output.
+  const recover = (): Promise<void> => {
+    if (disposed || connected || changingDevice || !recoverable) return Promise.resolve();
+    if (recovery) return recovery;
+    if (Date.now() - lastRecoveryAt < 2000) return Promise.resolve();
+    lastRecoveryAt = Date.now();
+    recovery = setDevice(expectedSinkId, selected).catch(error => {
+      recoverable = true;
+      throw error;
+    }).finally(() => { recovery = null; });
+    return recovery;
   };
 
   const onSinkChange = () => {
-    if (changingDevice) return;
+    if (changingDevice || disposed) return;
     const actualSinkId = (context as AudioContext & { sinkId?: string }).sinkId;
-    if (deviceReady && actualSinkId === expectedSinkId) {
+    if ((deviceReady || recoverable) && actualSinkId === expectedSinkId) {
+      deviceReady = true;
       try {
         setChannel(selected);
-      } catch {
+      } catch (error) {
         mute();
+        recoverable = true;
+        reportFault(error instanceof Error ? error.message : 'Output pair disconnected');
       }
       return;
     }
     deviceReady = false;
+    recoverable = true;
     // Never let a browser/device fallback fold our bus into another pair.
     mute();
+    reportFault('Output device changed unexpectedly; awaiting the selected device');
   };
   context.addEventListener("sinkchange", onSinkChange);
   setChannel(selected);
@@ -113,8 +162,11 @@ export function createAudioOutputRouter(context: BaseAudioContext) {
     input,
     setChannel,
     setDevice,
+    recover,
+    getStatus: () => ({ connected, changingDevice, recoverable, channel: selected, fault }),
     mute,
     dispose: () => {
+      disposed = true;
       mute();
       context.removeEventListener("sinkchange", onSinkChange);
     },

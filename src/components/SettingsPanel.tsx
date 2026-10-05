@@ -22,7 +22,7 @@ export function SettingsPanel({ travelerEnabled, showTravelerPlace, onShowTravel
     () => getMidiKeyboardEnabled(),
   );
   const applyAudioOutput = useCallback(
-    (deviceId: string) => audioEngine.setOutputDevice(deviceId),
+    (deviceId: string, channel?: AudioOutputChannel) => audioEngine.setOutputDevice(deviceId, channel),
     [],
   );
   const applyAudioOutputChannel = useCallback(
