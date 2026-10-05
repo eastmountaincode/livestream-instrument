@@ -33,7 +33,7 @@ assert.equal(quiet.state.gainDb, frozen, 'dropouts never increase gain');
 updateSourceLevel(quiet.state, samples(.0011), .2);
 assert.equal(quiet.state.gainDb, frozen, 'an isolated sound after silence cannot trigger boost');
 assert.equal(settle(.00001).gain, 1, 'sub-threshold hiss is not boosted');
-assert.ok(settle(.00011).gain <= 10 ** (42 / 20), 'quiet feeds have a finite boost ceiling');
+assert.ok(settle(.00011).gain <= 10 ** (72 / 20), 'quiet feeds have a finite boost ceiling');
 const dcState = createSourceLevelState();
 updateSourceLevel(dcState, new Float32Array(2048).fill(.4), .2);
 assert.equal(dcState.gainDb, 0, 'DC offset is not treated as useful signal');
@@ -45,6 +45,19 @@ assert.ok(db(.8 / Math.SQRT2) + gust.state.gainDb < -23, 'a loud gust is reduced
 const beforeRecovery = gust.state.gainDb;
 updateSourceLevel(gust.state, samples(.02), .2);
 assert.ok(gust.state.gainDb - beforeRecovery < 2, 'gain recovers slowly instead of pumping');
+// Healthy streams may have extremely little energy inside a narrow chord.
+// The input gate must distinguish those from actual silence/disconnection.
+const narrow = createSourceLevelState();
+for (let i = 0; i < 30; i++) updateSourceLevel(narrow, samples(.00001), .2, -38, { inputPower: .001, background: true });
+assert.ok(Math.abs(db(.00001 / Math.SQRT2) + narrow.gainDb + 38) < .6,
+  'quiet extracted chords reach the target when the original feed is healthy');
+assert.ok(narrow.gainDb > 60 && narrow.gainDb <= 72, 'narrow-band makeup is sufficient but bounded');
+const held = narrow.gainDb;
+for (let i = 0; i < 50; i++) updateSourceLevel(narrow, samples(.000002), .2, -38, { inputPower: 0, background: true });
+assert.equal(narrow.gainDb, held, 'a missing raw input cannot cause background makeup gain');
+assert.equal(narrow.signalSeconds, 0, 'dropouts require fresh input qualification');
+for (let i = 0; i < 3; i++) updateSourceLevel(narrow, samples(.8), .2, -38, { inputPower: .3 });
+assert.ok(db(.8 / Math.SQRT2) + narrow.gainDb < -23, 'a sudden loud return is cut even after large makeup');
 console.log('Source level policy passed: baseline matching, fast attenuation, slow recovery, silence/DC/invalid data, and boost cap.');
 
 const output = url(compile('../src/services/audioOutput.ts'));
@@ -62,7 +75,7 @@ class TestContext extends webAudioEngine.RenderingAudioContext {
     const source = this.createBufferSource();
     source.buffer = this.createBuffer(1, 48000, 48000);
     const data = source.buffer.getChannelData(0);
-    for (let i = 0; i < data.length; i++) data[i] = element.amplitude * Math.sin(2 * Math.PI * 440 * i / 48000 + (element.phase ?? 0))
+    for (let i = 0; i < data.length; i++) data[i] = element.amplitude * Math.sin(2 * Math.PI * (element.frequency ?? 440) * i / 48000 + (element.phase ?? 0))
       + (element.rumble ?? 0) * Math.sin(2 * Math.PI * 20 * i / 48000);
     source.loop = true; source.start(); return source;
   }
@@ -79,7 +92,7 @@ for (const id of ['quiet', 'loud']) {
   // This pull-based renderer needs a silent destination connection to process
   // an analyser branch. Chromium processes unconnected analysers natively.
   const silent = engine.ctx.createGain(); silent.gain.value = 0;
-  channel.sourceLevelAnalyser.connect(silent); silent.connect(engine.ctx.destination);
+  channel.rawAnalyser.connect(silent); channel.sourceLevelAnalyser.connect(silent); silent.connect(engine.ctx.destination);
   channel.limiter.ratio.value = 1;
   engine.setStreamLevelMatch(id, false);
 }
@@ -133,7 +146,7 @@ colored.addStream('clear', { amplitude: .005 });
 for (const id of ['rumble', 'clear']) {
   const ch = colored.channels.get(id);
   const silent = colored.ctx.createGain(); silent.gain.value = 0;
-  ch.sourceLevelAnalyser.connect(silent); silent.connect(colored.ctx.destination);
+  ch.rawAnalyser.connect(silent); ch.sourceLevelAnalyser.connect(silent); silent.connect(colored.ctx.destination);
   ch.limiter.ratio.value = 1; colored.setStreamLevelMatch(id, false);
 }
 colored.noteOn(69, 100, 'chord-pad'); await Promise.resolve();
@@ -165,7 +178,7 @@ for (const secondVolume of [0, .0258, 2.58]) {
   transition.setStreamVolume('other', secondVolume);
   for (const ch of transition.channels.values()) {
     const sink = transition.ctx.createGain(); sink.gain.value = 0;
-    ch.sourceLevelAnalyser.connect(sink); sink.connect(transition.ctx.destination);
+    ch.rawAnalyser.connect(sink); ch.sourceLevelAnalyser.connect(sink); sink.connect(transition.ctx.destination);
     ch.limiter.ratio.value = 1;
   }
   transition.noteOn(69, 254, 'chord-pad'); await Promise.resolve();
@@ -197,7 +210,7 @@ deferred.addStream('ready', { amplitude: .001 });
 deferred.addStream('lost', { amplitude: .001 });
 for (const ch of deferred.channels.values()) {
   const sink = deferred.ctx.createGain(); sink.gain.value = 0;
-  ch.sourceLevelAnalyser.connect(sink); sink.connect(deferred.ctx.destination);
+  ch.rawAnalyser.connect(sink); ch.sourceLevelAnalyser.connect(sink); sink.connect(deferred.ctx.destination);
 }
 deferred.setTravelerSource('ready');
 assert.equal(deferred.travelerLevelTargetDb, null, 'entering without a chord waits for useful reference audio');
@@ -206,3 +219,47 @@ deferred.noteOn(69, 127, 'chord-pad'); await Promise.resolve();
 deferred.ctx.processTo(1); deferred.updateSourceLevels();
 assert.ok(Number.isFinite(deferred.travelerLevelTargetDb), 'a lost reference stream does not block calibration from the audible normal mix');
 console.log('Deferred entry passed: no chord waits; unavailable reference cannot block leveling.');
+
+// Fifteen simultaneous feeds, with weak pitch energy despite healthy input.
+// Verify the real graph's correction and that parked wall time is excluded.
+const many = new AudioEngine();
+many.setToneMode('bands'); many.setMasterVolume(.05); many.compressor.ratio.value = 1;
+many.setChordPadTight(true); many.setTravelerSource('0');
+for (let i = 0; i < 15; i++) {
+  many.addStream(String(i), { amplitude: .002 * 10 ** (-i / 20), frequency: 300 });
+  const ch = many.channels.get(String(i));
+  const sink = many.ctx.createGain(); sink.gain.value = 0;
+  ch.rawAnalyser.connect(sink); ch.sourceLevelAnalyser.connect(sink); sink.connect(many.ctx.destination);
+  ch.limiter.ratio.value = 1; many.setStreamLevelMatch(String(i), false);
+}
+many.setFilterQ(95); many.noteOn(69, 127, 'chord-pad'); await Promise.resolve();
+let maxRendering = 0;
+for (let i = 0; i < 180; i++) {
+  many.ctx.processTo(many.ctx.currentTime + .2); many.updateSourceLevels();
+  maxRendering = Math.max(maxRendering, [...many.channels.values()].filter(ch => ch.rendering).length);
+}
+assert.ok(maxRendering <= 2, 'level matching never revives all fifteen DSP branches');
+assert.ok(many.channels.get('14').sourceLevelState.signalSeconds < 10, 'inactive time is not counted as measured audio');
+const levels = [];
+for (let i = 0; i < 15; i++) {
+  many.setTravelerSource(String(i)); many.ctx.processTo(many.ctx.currentTime + .3);
+  const data = many.ctx.exportAsAudioData().channelData[0].slice(-4096);
+  assert.ok(data.every(Number.isFinite));
+  levels.push(db(Math.sqrt(data.reduce((sum, x) => sum + x*x, 0) / data.length)));
+}
+assert.ok(Math.min(...levels) > -70, 'all fifteen quiet extracted signals receive useful makeup');
+assert.ok(Math.max(...levels) - Math.min(...levels) < 1.5, 'fifteen sources match before audible settling');
+console.log(`15-source narrow-band regression passed: ${ (Math.max(...levels)-Math.min(...levels)).toFixed(2) } dB spread; ${maxRendering} DSP branches.`);
+
+// Reference timbre changes must follow the audible gain without waiting for
+// the next leveling tick (or overwriting velocity/envelope controls).
+many.setToneMode('harmonic-evidence');
+many.setHarmonicEvidenceSettings({ amount: 2, color: 1, response: 1 });
+many.ctx.processTo(many.ctx.currentTime + .3); many.updateAnalyzedToneVoices();
+many.ctx.processTo(many.ctx.currentTime + .3);
+const voice = many.channels.get('14').activeVoices.get(69);
+assert.ok(Math.abs(voice.levelReferenceGain.gain.value * 8 - voice.gain.gain.value) < .01,
+  'harmonic evidence changes reach both audible and reference paths together');
+many.setToneMode('bands'); many.ctx.processTo(many.ctx.currentTime + .3);
+assert.ok(Math.abs(voice.levelReferenceGain.gain.value - 1) < .001, 'changing tone mode also updates the reference');
+console.log('Timbre reference regression passed.');

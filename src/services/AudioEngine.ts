@@ -122,6 +122,7 @@ interface StreamChannel {
   sourceLevelGain: GainNode;
   sourceLevelState: SourceLevelState;
   sourceLevelSamples: Float32Array<ArrayBuffer>;
+  sourceInputSamples: Float32Array<ArrayBuffer>;
   sourceLevelUpdatedAt: number;
   sourceLevelAnalyser: AnalyserNode;
   sourceLevelHighPass: BiquadFilterNode;
@@ -139,6 +140,7 @@ interface StreamChannel {
   voices: Voice[];
   activeVoices: Map<number, Voice>;
   rendering: boolean;
+  renderingSince: number;
   filterQ: number;
   volume: number;
   highPassFreq: number;
@@ -368,6 +370,7 @@ export class AudioEngine {
       sourceLevelGain,
       sourceLevelState: createSourceLevelState(),
       sourceLevelSamples: new Float32Array(8192),
+      sourceInputSamples: new Float32Array(8192),
       sourceLevelAnalyser,
       sourceLevelHighPass,
       sourceLevelLowPass,
@@ -385,6 +388,7 @@ export class AudioEngine {
       voices,
       activeVoices: new Map(),
       rendering: true,
+      renderingSince: now,
       filterQ: this.filterQ,
       volume: DEFAULT_VOL,
       highPassFreq: DEFAULT_HIGH_PASS_FREQ,
@@ -870,6 +874,14 @@ export class AudioEngine {
         voice.tight ? TIGHT_ATTACK : response.bandTimeConstant,
       );
 
+      // The reference must follow the same changing timbre as the audible
+      // voice, without copying velocity or the player's envelope.
+      voice.levelReferenceGain.gain.cancelScheduledValues(now);
+      voice.levelReferenceGain.gain.setTargetAtTime(
+        this.getVoiceOutputGain(voice, 127) / VOICE_GAIN_BOOST,
+        now,
+        voice.tight ? TIGHT_ATTACK : response.gainTimeConstant,
+      );
       voice.gain.gain.cancelScheduledValues(now);
       voice.gain.gain.setTargetAtTime(
         this.getVoiceOutputGain(voice, this.getEffectiveVelocity(note)),
@@ -937,6 +949,12 @@ export class AudioEngine {
           );
         }
         if (!harmonicEvidenceEnabled) voice.harmonicEvidence = 0;
+        voice.levelReferenceGain.gain.cancelScheduledValues(now);
+        voice.levelReferenceGain.gain.setTargetAtTime(
+          this.getVoiceOutputGain(voice, 127) / VOICE_GAIN_BOOST,
+          now,
+          voice.tight ? TIGHT_ATTACK : 0.04,
+        );
         voice.gain.gain.setTargetAtTime(
           this.getVoiceOutputGain(voice, this.getEffectiveVelocity(note)),
           now,
@@ -1318,6 +1336,7 @@ export class AudioEngine {
     // All media stay connected; only one silent destination warms at a time.
     for (const ch of this.channels.values()) {
       if (!ch.rendering) continue;
+      if (!this.shouldAnalyzeChannel(ch) && now - ch.renderingSince < this.sourceLevelWarmup(ch)) continue;
       const elapsed = now - ch.sourceLevelUpdatedAt;
       ch.sourceLevelUpdatedAt = now;
       if (elapsed <= 0) continue;
@@ -1329,23 +1348,27 @@ export class AudioEngine {
         ch.sourceLevelState.signalSeconds = 0;
         continue; // A release or a pause must not make the next hit louder.
       }
-      for (const voice of ch.activeVoices.values()) {
-        const reference = this.getVoiceOutputGain(voice, 127) / VOICE_GAIN_BOOST;
-        if (voice.levelReferenceGain.gain.value !== reference) {
-          voice.levelReferenceGain.gain.setValueAtTime(reference, now);
-        }
-      }
       ch.sourceLevelAnalyser.getFloatTimeDomainData(ch.sourceLevelSamples);
       // Include the existing resonance compensation, without any user gain.
       const resonanceGain = ch.levelMatchGain.gain.value;
       for (let i = 0; i < ch.sourceLevelSamples.length; i++) ch.sourceLevelSamples[i] *= resonanceGain;
       if (this.travelerLevelTargetDb == null) continue;
       const previousDb = ch.sourceLevelState.gainDb;
-      const gain = updateSourceLevel(ch.sourceLevelState, ch.sourceLevelSamples, elapsed, this.travelerLevelTargetDb);
+      ch.rawAnalyser.getFloatTimeDomainData(ch.sourceInputSamples);
+      const gain = updateSourceLevel(ch.sourceLevelState, ch.sourceLevelSamples, elapsed, this.travelerLevelTargetDb, {
+        inputPower: sourceLevelPower(ch.sourceInputSamples),
+        background: !this.shouldAnalyzeChannel(ch),
+      });
       if (ch.sourceLevelState.gainDb !== previousDb) {
-        ch.sourceLevelGain.gain.setTargetAtTime(gain, now, gain < ch.sourceLevelGain.gain.value ? 0.03 : 0.15);
+        if (!this.shouldAnalyzeChannel(ch)) {
+          ch.sourceLevelGain.gain.cancelScheduledValues(now);
+          ch.sourceLevelGain.gain.setValueAtTime(gain, now);
+        } else {
+          ch.sourceLevelGain.gain.setTargetAtTime(gain, now, gain < ch.sourceLevelGain.gain.value ? 0.03 : 0.15);
+        }
       }
     }
+    if (this.sourceLevelBackground && now - this.sourceLevelBackground.renderingSince < this.sourceLevelWarmup(this.sourceLevelBackground)) return;
     const background = [...this.channels.values()].filter(ch => !this.shouldAnalyzeChannel(ch)
       && ch.activeVoices.size && !ch.audioElement.paused && ch.audioElement.readyState >= 2);
     this.sourceLevelBackground = background.length
@@ -1358,6 +1381,15 @@ export class AudioEngine {
       if (next.levelMatchPending) this.updateLevelMatch(next, true);
     }
     this.syncChannelRendering();
+  }
+
+  private sourceLevelWarmup(ch: StreamChannel): number {
+    // High-Q bass filters take longer to settle than the meter's 171 ms window.
+    // Sample a complete settled window, not the transient from reconnecting DSP.
+    let lowest = Infinity;
+    for (const voice of ch.activeVoices.values()) lowest = Math.min(lowest, voice.targetFrequency);
+    return Math.min(1, Math.max(0.2, ch.sourceLevelSamples.length / this.ctx.sampleRate
+      + 3 * ch.filterQ / (Math.PI * Math.max(40, lowest))));
   }
 
   private syncChannelRendering() {
@@ -1376,6 +1408,11 @@ export class AudioEngine {
         }
       }
       ch.rendering = rendering;
+      // Parked wall time is not evidence of a continuously healthy signal.
+      if (rendering) {
+        ch.sourceLevelUpdatedAt = this.ctx.currentTime;
+        ch.renderingSince = this.ctx.currentTime;
+      }
     }
   }
 

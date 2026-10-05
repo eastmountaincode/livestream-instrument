@@ -164,7 +164,8 @@ assert.equal(spectrumReads.size, 15, 'leaving Traveler restores analysis for eve
 // must stop rendering, while media connections and held notes remain intact.
 engine.setTravelerSource(slots[0].id);
 const warmed = new Set();
-for (let tick = 0; tick < 30; tick++) {
+// Allow at most one second of filter settling per background destination.
+for (let tick = 0; tick < 80; tick++) {
   engine.ctx.processTo(engine.ctx.currentTime + .2);
   engine.updateSourceLevels();
   const rendering = [...engine.channels].filter(([, ch]) => ch.rendering);

@@ -273,7 +273,8 @@ for (const channel of audioEngine.channels.values()) {
         }
     }
 }
-for (let i = 0; i < 15; i++) {
+// High-Q destinations get a settled meter window before rotating.
+for (let i = 0; i < 85; i++) {
     warmCalls = 0;
     audioEngine.ctx.processTo(audioEngine.ctx.currentTime + .2);
     audioEngine.updateSourceLevels();
