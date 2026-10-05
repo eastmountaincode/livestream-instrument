@@ -268,8 +268,8 @@ export const STREAM_CANDIDATE_SEEDS: StreamCandidate[] = ([
     pageUrl: 'https://locusonus.org/soundmap/',
     format: 'MP3 Icecast',
     source: 'Locus Sonus / CreaCast',
-    status: 'accepted',
-    notes: 'Roof of private house near 10° 6′ 54.4″ N, 76° 23′ 6.7″ E.',
+    status: 'rejected',
+    notes: 'Removed from live sources on 2026-10-05: reported not connecting. Roof of private house near 10° 6′ 54.4″ N, 76° 23′ 6.7″ E.',
   },
   {
     id: 'locus-yamanakako-cyberforest',

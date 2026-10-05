@@ -1,13 +1,12 @@
 import type { LiveSource } from '../services/streams';
 
-// Keep the original eight first; new destinations never replace an offline one.
+// Keep the preferred destinations first; transient outages never replace a source.
 export const WORLD_TRAVELER_SOURCES = [
   { id: 'locus-jasper-ridge', label: 'California' },
   { id: 'locus-acra-wave-farm', label: 'New York' },
   { id: 'locus-london-greenwich-peninsula', label: 'London' },
   { id: 'locus-ortler-glacier', label: 'Italy' },
   { id: 'locus-zalubice-summer-house', label: 'Poland' },
-  { id: 'locus-india-stream-083', label: 'India' },
   { id: 'locus-yamanakako-cyberforest', label: 'Japan' },
   { id: 'locus-jeju-georo', label: 'Korea' },
 ] as const;
