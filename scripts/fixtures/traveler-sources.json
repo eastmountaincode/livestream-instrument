@@ -73,5 +73,10 @@
     "id": "locus-usti-nad-labem-duul",
     "name": "Usti nad Labem - Duul",
     "location": "Usti nad Labem, Czech Republic"
+  },
+  {
+    "id": "locus-santiago-maviuc",
+    "name": "Santiago - MAVIUC",
+    "location": "Santiago, Chile"
   }
 ]
