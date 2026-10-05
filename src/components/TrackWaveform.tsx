@@ -12,13 +12,12 @@ export function TrackWaveform({ id, muted }: TrackWaveformProps) {
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    const analyser = audioEngine.getStreamAnalyser(id);
-    if (!canvas || !analyser) return;
+    if (!canvas) return;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const data = new Uint8Array(analyser.fftSize);
+    let data = new Uint8Array(256);
     const styles = getComputedStyle(canvas);
     const paperColor = styles.getPropertyValue('--color-paper').trim() || '#fff';
     const inkColor = styles.getPropertyValue('--color-ink').trim() || '#1646a0';
@@ -26,7 +25,15 @@ export function TrackWaveform({ id, muted }: TrackWaveformProps) {
 
     const draw = () => {
       rafRef.current = requestAnimationFrame(draw);
-      analyser.getByteTimeDomainData(data);
+      // Traveler mounts all rows before asynchronous streams finish opening.
+      // Resolve each frame so late connections and replacement nodes are seen.
+      const analyser = audioEngine.getStreamAnalyser(id);
+      if (analyser) {
+        if (data.length !== analyser.fftSize) data = new Uint8Array(analyser.fftSize);
+        analyser.getByteTimeDomainData(data);
+      } else {
+        data.fill(128);
+      }
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.globalAlpha = 1;
