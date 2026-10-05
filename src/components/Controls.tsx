@@ -458,7 +458,7 @@ export function Controls({
               <input
                 type="range"
                 min="0"
-                max="4"
+                max="8"
                 step="0.01"
                 value={masterVolume}
                 className="col-span-2 w-full min-w-0"
@@ -492,7 +492,7 @@ export function Controls({
               <input
                 type="range"
                 min="0"
-                max="4"
+                max="8"
                 step="0.01"
                 value={chordPadVolume}
                 className="col-span-2 w-full min-w-0"
