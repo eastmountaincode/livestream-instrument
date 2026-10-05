@@ -394,7 +394,7 @@ export function Controls({
         </div>
       )}
       <div className="dev-mode dev-mode-cyan grid gap-3 pt-3">
-        <div className="grid items-start gap-x-6 gap-y-2 sm:grid-cols-[minmax(0,240px)_minmax(0,240px)] sm:justify-between">
+        <div className="grid w-full max-w-[504px] items-start gap-x-6 gap-y-2 sm:grid-cols-2">
           <label className="dev-mode dev-mode-orange grid w-full max-w-[240px] grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-black" title="High-pass filter">
             <span className="sc-label text-[11px] font-black uppercase">High Pass</span>
             <span className="sc-value text-right font-mono text-[11px] font-black text-black">{formatFrequency(highPassFreq)}</span>
