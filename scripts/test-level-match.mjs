@@ -85,6 +85,14 @@ for (const dark of [false, true]) {
     assert.ok(Math.abs(estimate(quieter, sampleRate, bands, 30, q) - gain) < 1e-5, 'quieter input must not cause more makeup gain');
   }
 }
+const travelerBroadGain = estimate(spectrum, sampleRate, bands, 30, 1, false);
+const normalBroadGain = estimate(spectrum, sampleRate, bands, 30, 1);
+assert.ok(Math.abs(20 * Math.log10(travelerBroadGain / normalBroadGain) - 3) < .001,
+  'Traveler uses energy matching without the normal-mode listening trim');
+const travelerBroad = await render(1, travelerBroadGain);
+const travelerReference = await render(30, 1);
+assert.ok(Math.abs(20 * Math.log10(travelerBroad / travelerReference)) < 1.5,
+  'Traveler broad resonance shares the same target as narrow resonance');
 assert.equal(estimate(spectrum, sampleRate, bands, 30, 30), 1, 'enabling and returning to reference must be unity');
 assert.equal(estimate(spectrum, sampleRate, bands, 1, 1), 1, 'a minimum-resonance reference must also stay at unity');
 assert.ok(Math.abs(estimate(spectrum, sampleRate, bands, 5, 1)

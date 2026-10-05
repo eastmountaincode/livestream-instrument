@@ -159,6 +159,10 @@ engine.updateAnalyzedToneVoices();
 assert.ok([...spectrumReads.keys()].every(id => id === slots[1].id), 'periodic analysis skips silent destinations');
 spectrumReads.clear();
 engine.setTravelerSource(null);
+// Already-current corrections are preserved on exit; the next analysis tick
+// still visits all normal-mode tracks.
+engine.ctx.processTo(engine.ctx.currentTime + .1);
+engine.updateAnalyzedToneVoices();
 assert.equal(spectrumReads.size, 15, 'leaving Traveler restores analysis for every normal track');
 // Muting a stream is insufficient: its resonators and level-reference branch
 // must stop rendering, while media connections and held notes remain intact.

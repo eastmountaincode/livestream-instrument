@@ -14,6 +14,10 @@ function lowResonanceTrimDb(q: number): number {
   return -3 * Math.max(0, Math.min(1, 1 - Math.log10(q)));
 }
 
+export function resonanceListeningTrim(referenceQ: number, currentQ: number): number {
+  return 10 ** ((lowResonanceTrimDb(currentQ) - lowResonanceTrimDb(referenceQ)) / 20);
+}
+
 interface PreparedBand {
   cosine: number;
   referenceAlpha: number;
@@ -53,6 +57,7 @@ export function estimateResonanceLevelMatch(
   bands: ResonanceBand[],
   referenceQ: number,
   currentQ: number,
+  listeningTrim = true,
 ): number | null {
   if (referenceQ === currentQ) return 1;
   const validBands = bands.filter(b => Number.isFinite(b.frequency) && b.frequency > 0
@@ -99,7 +104,8 @@ export function estimateResonanceLevelMatch(
     previousFrequency = frequency;
   }
   if (!Number.isFinite(reference) || !Number.isFinite(current) || reference < 1e-12 || current < 1e-12) return null;
-  const listeningCorrection = 10 ** ((lowResonanceTrimDb(currentQ) - lowResonanceTrimDb(referenceQ)) / 20);
+  const listeningCorrection = listeningTrim
+    ? resonanceListeningTrim(referenceQ, currentQ) : 1;
   // Limit makeup gain when the selected notes contain little input energy.
   return Math.min(8, Math.max(1 / 64, Math.sqrt(reference / current) * listeningCorrection));
 }

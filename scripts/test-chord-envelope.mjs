@@ -34,7 +34,7 @@ function fixture(tight, toneMode = 'bands') {
   source.connect(gain);
   source.start();
   const voice = { gain, levelReferenceGain: ctx.createGain(), filter: ctx.createBiquadFilter(), harmonicBands: [], active: false, tight: false, harmonicEvidence: 0 };
-  const channel = { highPassFilter: ctx.createBiquadFilter(), lowPassFilter: ctx.createBiquadFilter(), levelMatchGain, streamGain, levelMatch: false, levelMatchReferenceQ: 30, levelMatchPending: false, volume: 1, rawAnalyser: { getFloatFrequencyData: bins => bins.fill(-40) }, analysisBins: new Float32Array(4096), voices: [voice], activeVoices: new Map(), octaveShift: 0, filterQ: 30 };
+  const channel = { highPassFilter: ctx.createBiquadFilter(), lowPassFilter: ctx.createBiquadFilter(), levelMatchGain, sourceLevelResonanceGain: ctx.createGain(), levelMatchCorrection: 1, streamGain, levelMatch: false, levelMatchReferenceQ: 30, levelMatchPending: false, volume: 1, rawAnalyser: { getFloatFrequencyData: bins => bins.fill(-40) }, analysisBins: new Float32Array(4096), voices: [voice], activeVoices: new Map(), octaveShift: 0, filterQ: 30 };
   const engine = Object.assign(Object.create(AudioEngine.prototype), {
     ctx, channels: new Map([['fixture', channel]]), activeNotes: new Map(),
     chordPadTight: tight, pitchBendSemitones: 0, toneMode,

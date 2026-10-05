@@ -168,7 +168,7 @@ console.log(`Different-spectrum regression passed: rumble-heavy versus clear sou
 
 // Regression: entering Traveler must inherit a quiet normal mix, not climb
 // toward the old fixed -38 dB reference. Exercise low and high saved faders.
-for (const secondVolume of [0, .0258, 2.58]) {
+for (const [secondVolume, resonanceQ] of [[0, 30], [.0258, 30], [2.58, 30], [0, 1]]) {
   const transition = new AudioEngine();
   transition.setToneMode('bands'); transition.setMasterVolume(1);
   transition.compressor.ratio.value = 1;
@@ -181,13 +181,16 @@ for (const secondVolume of [0, .0258, 2.58]) {
     ch.rawAnalyser.connect(sink); ch.sourceLevelAnalyser.connect(sink); sink.connect(transition.ctx.destination);
     ch.limiter.ratio.value = 1;
   }
+  transition.setFilterQ(resonanceQ);
   transition.noteOn(69, 254, 'chord-pad'); await Promise.resolve();
   function level(seconds = .2) {
     transition.ctx.processTo(transition.ctx.currentTime + seconds);
     const data = transition.ctx.exportAsAudioData().channelData[0].slice(-2048);
     return Math.sqrt(data.reduce((sum, x) => sum + x*x, 0) / data.length);
   }
-  const normalLevel = level(2);
+  level(1);
+  for (const ch of transition.channels.values()) if (ch.levelMatchPending) transition.updateLevelMatch(ch);
+  const normalLevel = level(1);
   transition.setTravelerSource('california');
   let maximum = 0, final = 0;
   for (let i = 0; i < 100; i++) {
@@ -198,7 +201,7 @@ for (const secondVolume of [0, .0258, 2.58]) {
   assert.ok(Math.abs(db(final / normalLevel)) < 1, 'Traveler converges to the chosen normal listening level');
   transition.setTravelerSource(null);
   const returned = level();
-  assert.ok(Math.abs(db(returned / normalLevel)) < .2, 'leaving Traveler restores the same normal level');
+  assert.ok(Math.abs(db(returned / normalLevel)) < .2, `leaving Traveler restores normal: Q=${resonanceQ}, fader=${secondVolume}, delta=${db(returned/normalLevel)}`);
   assert.equal(transition.getStreamVolume('california'), .99);
   assert.equal(transition.getStreamVolume('other'), secondVolume);
   console.log(`Mode transition passed: second fader ${secondVolume}, peak change ${db(maximum / normalLevel).toFixed(2)} dB, final change ${db(final / normalLevel).toFixed(2)} dB.`);
@@ -263,3 +266,28 @@ assert.ok(Math.abs(voice.levelReferenceGain.gain.value * 8 - voice.gain.gain.val
 many.setToneMode('bands'); many.ctx.processTo(many.ctx.currentTime + .3);
 assert.ok(Math.abs(voice.levelReferenceGain.gain.value - 1) < .001, 'changing tone mode also updates the reference');
 console.log('Timbre reference regression passed.');
+
+// Measure the actual audible window while Q and its compensation change.
+// A post-hoc multiplication by the newest gain fails this timing contract.
+const sweep = new AudioEngine();
+sweep.setToneMode('bands'); sweep.setMasterVolume(.1); sweep.compressor.ratio.value = 1;
+sweep.setChordPadTight(true); sweep.setTravelerSource('meter');
+sweep.addStream('meter', { amplitude: .03, frequency: 300 });
+const meter = sweep.channels.get('meter'); meter.limiter.ratio.value = 1;
+const sink = sweep.ctx.createGain(); sink.gain.value = 0;
+meter.rawAnalyser.connect(sink); meter.sourceLevelAnalyser.connect(sink); sink.connect(sweep.ctx.destination);
+sweep.noteOn(69, 127, 'chord-pad'); await Promise.resolve();
+sweep.ctx.processTo(2); sweep.updateLevelMatch(meter); sweep.ctx.processTo(3);
+function meterOutputRatio() {
+  meter.sourceLevelAnalyser.getFloatTimeDomainData(meter.sourceLevelSamples);
+  const data = sweep.ctx.exportAsAudioData().channelData[0].slice(-8192);
+  const power = a => a.reduce((s, x) => s+x*x, 0)/a.length;
+  return Math.sqrt(power(data)/power(meter.sourceLevelSamples));
+}
+const referenceRatio = meterOutputRatio(); let maxMeterError = 0;
+for (const q of [1, 2, 10, 30, 100, 2, 95]) {
+  sweep.setFilterQ(q); sweep.ctx.processTo(sweep.ctx.currentTime + .08);
+  maxMeterError = Math.max(maxMeterError, Math.abs(db(meterOutputRatio()/referenceRatio)));
+}
+assert.ok(maxMeterError < .5, 'leveler measures the audible compensated window throughout a resonance sweep');
+console.log(`Resonance meter regression passed: ${maxMeterError.toFixed(2)} dB maximum tracking error.`);

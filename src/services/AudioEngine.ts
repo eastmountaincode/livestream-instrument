@@ -1,5 +1,5 @@
 import { createSourceLevelState, updateSourceLevel, sourceLevelPower, DEFAULT_SOURCE_LEVEL_DB, type SourceLevelState } from './sourceLeveling';
-import { estimateResonanceLevelMatch, type ResonanceBand } from './resonanceLevelMatch';
+import { estimateResonanceLevelMatch, resonanceListeningTrim, type ResonanceBand } from './resonanceLevelMatch';
 import { createAudioOutputRouter } from "./audioOutputRouter";
 /**
  * Resonant Filter Instrument Engine
@@ -115,6 +115,7 @@ interface StreamChannel {
   source: MediaElementAudioSourceNode;
   streamGain: GainNode;
   levelMatchGain: GainNode;
+  levelMatchCorrection: number;
   levelMatch: boolean;
   levelMatchReferenceQ: number;
   levelMatchPending: boolean;
@@ -125,6 +126,7 @@ interface StreamChannel {
   sourceInputSamples: Float32Array<ArrayBuffer>;
   sourceLevelUpdatedAt: number;
   sourceLevelAnalyser: AnalyserNode;
+  sourceLevelResonanceGain: GainNode;
   sourceLevelHighPass: BiquadFilterNode;
   sourceLevelLowPass: BiquadFilterNode;
   rawAnalyser: AnalyserNode;
@@ -269,7 +271,9 @@ export class AudioEngine {
     const sourceLevelAnalyser = this.ctx.createAnalyser();
     sourceLevelAnalyser.fftSize = 8192;
     sourceLevelHighPass.connect(sourceLevelLowPass);
-    sourceLevelLowPass.connect(sourceLevelAnalyser);
+    const sourceLevelResonanceGain = this.ctx.createGain();
+    sourceLevelLowPass.connect(sourceLevelResonanceGain);
+    sourceLevelResonanceGain.connect(sourceLevelAnalyser);
 
     const highPassFilter = this.ctx.createBiquadFilter();
     highPassFilter.type = 'highpass';
@@ -363,6 +367,7 @@ export class AudioEngine {
       source,
       streamGain,
       levelMatchGain,
+      levelMatchCorrection: 1,
       levelMatch: true,
       levelMatchReferenceQ: this.filterQ,
       levelMatchPending: false,
@@ -372,6 +377,7 @@ export class AudioEngine {
       sourceLevelSamples: new Float32Array(8192),
       sourceInputSamples: new Float32Array(8192),
       sourceLevelAnalyser,
+      sourceLevelResonanceGain,
       sourceLevelHighPass,
       sourceLevelLowPass,
       sourceLevelUpdatedAt: now,
@@ -445,6 +451,7 @@ export class AudioEngine {
       }
       try { ch.source.disconnect(); } catch { /* ok */ }
       try { ch.sourceLevelAnalyser.disconnect(); } catch { /* ok */ }
+      try { ch.sourceLevelResonanceGain.disconnect(); } catch { /* ok */ }
       try { ch.sourceLevelHighPass.disconnect(); } catch { /* ok */ }
       try { ch.sourceLevelLowPass.disconnect(); } catch { /* ok */ }
       try { ch.sourceLevelGain.disconnect(); } catch { /* ok */ }
@@ -1175,7 +1182,7 @@ export class AudioEngine {
       this.startToneAnalysis();
       this.updateLevelMatch(ch);
     } else {
-      ch.levelMatchGain.gain.setTargetAtTime(1, this.ctx.currentTime, 0.02);
+      this.setLevelMatchCorrection(ch, 1, 0.02);
       if (this.toneMode === 'bands' && ![...this.channels.values()].some(channel => channel.levelMatch)) {
         this.stopToneAnalysis();
       }
@@ -1187,6 +1194,14 @@ export class AudioEngine {
     return { enabled: ch?.levelMatch ?? true, referenceQ: ch?.levelMatchReferenceQ ?? DEFAULT_Q };
   }
 
+  private setLevelMatchCorrection(ch: StreamChannel, correction: number, timeConstant = 0.01) {
+    ch.levelMatchCorrection = correction;
+    ch.levelMatchGain.gain.setTargetAtTime(correction, this.ctx.currentTime, timeConstant);
+    // Meter the same compensated audio window the listener hears, rather than
+    // multiplying older filter samples by the newest compensation afterwards.
+    ch.sourceLevelResonanceGain.gain.setTargetAtTime(correction, this.ctx.currentTime, timeConstant);
+  }
+
   private updateLevelMatch(ch: StreamChannel, includeBackground = false) {
     // Freeze between edits/hits and throughout releases. Never chase an
     // envelope, muted track, or a stream going silent.
@@ -1196,7 +1211,7 @@ export class AudioEngine {
       return;
     }
     if (ch.filterQ === ch.levelMatchReferenceQ) {
-      ch.levelMatchGain.gain.setTargetAtTime(1, this.ctx.currentTime, 0.01);
+      this.setLevelMatchCorrection(ch, 1);
       ch.levelMatchPending = false;
       return;
     }
@@ -1222,9 +1237,9 @@ export class AudioEngine {
       for (let i = 0; i < spectrum.length; i++) spectrum[i] += 20 * Math.log10(Math.max(1e-12, magnitude[i]));
     }
     const correction = estimateResonanceLevelMatch(spectrum, this.ctx.sampleRate,
-      bands, ch.levelMatchReferenceQ, ch.filterQ);
+      bands, ch.levelMatchReferenceQ, ch.filterQ, this.travelerSourceId == null);
     if (correction === null) { ch.levelMatchPending = true; return; }
-    ch.levelMatchGain.gain.setTargetAtTime(correction, this.ctx.currentTime, 0.01);
+    this.setLevelMatchCorrection(ch, correction);
     ch.levelMatchPending = false;
   }
 
@@ -1316,7 +1331,7 @@ export class AudioEngine {
       }
       if ((reference.power != null && reference.power > 0) || !ch.rendering || !ch.activeVoices.size) continue;
       ch.sourceLevelAnalyser.getFloatTimeDomainData(ch.sourceLevelSamples);
-      const power = sourceLevelPower(ch.sourceLevelSamples) * (ch.levelMatchGain.gain.value * reference.volume) ** 2;
+      const power = sourceLevelPower(ch.sourceLevelSamples) * reference.volume ** 2;
       // Never establish the show's listening level from an empty meter, a
       // release tail or a reconnect. Wait for an actual held chord instead.
       reference.power = power > 1e-9 ? power : 0;
@@ -1349,9 +1364,6 @@ export class AudioEngine {
         continue; // A release or a pause must not make the next hit louder.
       }
       ch.sourceLevelAnalyser.getFloatTimeDomainData(ch.sourceLevelSamples);
-      // Include the existing resonance compensation, without any user gain.
-      const resonanceGain = ch.levelMatchGain.gain.value;
-      for (let i = 0; i < ch.sourceLevelSamples.length; i++) ch.sourceLevelSamples[i] *= resonanceGain;
       if (this.travelerLevelTargetDb == null) continue;
       const previousDb = ch.sourceLevelState.gainDb;
       ch.rawAnalyser.getFloatTimeDomainData(ch.sourceInputSamples);
@@ -1455,7 +1467,26 @@ export class AudioEngine {
     }
     this.updateAnalyzedToneVoices();
     for (const ch of this.channels.values()) {
-      if (this.shouldAnalyzeChannel(ch)) this.updateLevelMatch(ch);
+      if (this.shouldAnalyzeChannel(ch) || wasTraveling !== (id != null)) {
+        const previousCorrection = ch.levelMatchGain.gain.value;
+        if (wasTraveling !== (id != null) && ch.levelMatch && !ch.levelMatchPending) {
+          // Changing modes changes the listening trim, not the input spectrum.
+          // Preserve the existing correction instead of re-estimating the mix.
+          const trim = resonanceListeningTrim(ch.levelMatchReferenceQ, ch.filterQ);
+          this.setLevelMatchCorrection(ch, ch.levelMatchCorrection * (id == null ? trim : 1 / trim));
+        } else {
+          this.updateLevelMatch(ch);
+        }
+        if (!wasTraveling && id != null) {
+          // Traveler uses a common energy target, without the normal-mode
+          // broad-resonance listening trim. Preserve the entry level as that
+          // correction changes; the source leveler then holds the same target.
+          const gain = ch.volume / DEFAULT_VOL * previousCorrection / ch.levelMatchCorrection;
+          ch.sourceLevelGain.gain.cancelScheduledValues(this.ctx.currentTime);
+          ch.sourceLevelGain.gain.setValueAtTime(gain, this.ctx.currentTime);
+          ch.sourceLevelState.gainDb = 20 * Math.log10(Math.max(1e-6, gain));
+        }
+      }
     }
     this.applyGains(wasTraveling !== (id != null));
   }
