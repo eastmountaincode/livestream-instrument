@@ -23,6 +23,10 @@ function settle(amplitude, seconds = 24) {
 const quiet = settle(.02), loud = settle(.2);
 assert.ok(Math.abs(db(quiet.rms / loud.rms)) < 1.2, 'feeds 20 dB apart converge without individual faders');
 assert.ok(Math.abs(db(loud.rms) + 38) < 1.1, 'steady source approaches the target baseline');
+const quietTarget = createSourceLevelState();
+for (let i = 0; i < 120; i++) updateSourceLevel(quietTarget, samples(.2), .2, -80);
+assert.ok(Math.abs(db(.2 / Math.SQRT2) + quietTarget.gainDb + 80) < .6,
+  'loud sources can attenuate far enough to match a quiet normal-mix reference');
 const frozen = quiet.state.gainDb;
 for (let i = 0; i < 100; i++) updateSourceLevel(quiet.state, samples(0), .2);
 assert.equal(quiet.state.gainDb, frozen, 'dropouts never increase gain');

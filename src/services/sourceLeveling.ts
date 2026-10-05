@@ -4,7 +4,8 @@
 export const DEFAULT_SOURCE_LEVEL_DB = -38;
 const SILENCE_DB = -90;
 const MAX_BOOST_DB = 42;
-const MAX_CUT_DB = -36;
+// A quiet user mix can need far more attenuation than the old fixed target.
+const MAX_CUT_DB = -120;
 const PEAK_CEILING = 0.125;
 
 export interface SourceLevelState {
