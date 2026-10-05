@@ -1,6 +1,7 @@
 import { createSourceLevelState, updateSourceLevel, sourceLevelPower, perceivedSourcePower, sourceLoudnessWeights, DEFAULT_SOURCE_LOUDNESS_DB, type SourceLevelState } from './sourceLeveling';
 import { estimateResonanceLevelMatch, resonanceListeningTrim, sourceResponseModel, predictSourceLevel, type SourceResponseModel, type ResonanceBand } from './resonanceLevelMatch';
 import { createAudioOutputRouter } from "./audioOutputRouter";
+import { createTravelerDynamics, TRAVELER_PEAK_CEILING } from "./travelerDynamics";
 /**
  * Resonant Filter Instrument Engine
  *
@@ -11,7 +12,8 @@ import { createAudioOutputRouter } from "./audioOutputRouter";
  *   audioElement → mono → filter(bandpass, Q) → voiceGain → levelMatch → sourceLevelGain → streamGain → EQ → limiter → masterGain → ...
  *
  * Master chain:
- *   masterGain → compressor → analyser → destination
+ *   masterGain → compressor → Traveler compressor/limiter (or bypass) → analyser
+ *   → output routing/Traveler peak ceiling → destination
  */
 
 import {
@@ -173,6 +175,7 @@ export class AudioEngine {
   compressor: DynamicsCompressorNode;
   analyser: AnalyserNode;
   private outputRouter: ReturnType<typeof createAudioOutputRouter>;
+  private travelerDynamics: ReturnType<typeof createTravelerDynamics>;
 
   private channels: Map<string, StreamChannel> = new Map();
   private filterQ = DEFAULT_Q;
@@ -213,7 +216,9 @@ export class AudioEngine {
     this.outputRouter = createAudioOutputRouter(this.ctx);
 
     this.masterGain.connect(this.compressor);
-    this.compressor.connect(this.analyser);
+    this.travelerDynamics = createTravelerDynamics(this.ctx);
+    this.compressor.connect(this.travelerDynamics.input);
+    this.travelerDynamics.output.connect(this.analyser);
     this.analyser.connect(this.outputRouter.input);
     let lastContextState = this.ctx.state;
     this.ctx.addEventListener('statechange', () => {
@@ -1607,7 +1612,11 @@ export class AudioEngine {
     const wasTraveling = this.travelerSourceId != null;
     if (this.sourceLevelingEnabled && !wasTraveling && id != null) this.captureTravelerReference();
     this.travelerSourceId = id;
-    if (wasTraveling !== (id != null)) this.setSourceLeveling(id != null);
+    if (wasTraveling !== (id != null)) {
+      this.setSourceLeveling(id != null);
+      this.travelerDynamics.setEnabled(id != null);
+      this.outputRouter.setPeakCeiling(id != null ? TRAVELER_PEAK_CEILING : null);
+    }
     // Keep the previous source connected for its existing soft release. The
     // next metering tick parks it; Tight still closes its gate immediately.
     if (wasTraveling && id != null) this.sourceLevelBackground = previous ?? null;

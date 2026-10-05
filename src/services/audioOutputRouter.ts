@@ -19,6 +19,10 @@ export function createAudioOutputRouter(context: BaseAudioContext) {
   input.channelInterpretation = "speakers";
   const panner = context.createStereoPanner();
   const splitter = context.createChannelSplitter(2);
+  const peakCeiling = context.createWaveShaper();
+  // After optional mono folding, before discrete hardware channel mapping.
+  // No oversampling: interpolation after a clip could create new overshoots.
+  peakCeiling.oversample = "none";
   let merger: ChannelMergerNode | null = null;
   let selected: AudioOutputChannel = "stereo";
   let changingDevice = false;
@@ -43,6 +47,7 @@ export function createAudioOutputRouter(context: BaseAudioContext) {
     connected = false;
     input.disconnect();
     panner.disconnect();
+    peakCeiling.disconnect();
     splitter.disconnect();
     merger?.disconnect();
     merger = null;
@@ -76,10 +81,10 @@ export function createAudioOutputRouter(context: BaseAudioContext) {
           channel === "left" ? -1 : 1,
           context.currentTime,
         );
-        input.connect(panner).connect(splitter);
+        input.connect(panner).connect(peakCeiling).connect(splitter);
       } else {
         input.channelCountMode = "explicit";
-        input.connect(splitter);
+        input.connect(peakCeiling).connect(splitter);
       }
       splitter.connect(merger, 0, left);
       splitter.connect(merger, 1, right);
@@ -161,6 +166,15 @@ export function createAudioOutputRouter(context: BaseAudioContext) {
   return {
     input,
     setChannel,
+    setPeakCeiling(ceiling: number | null) {
+      if (ceiling == null) { peakCeiling.curve = null; return; }
+      const curve = new Float32Array(4097);
+      for (let i = 0; i < curve.length; i++) {
+        const sample = 2 * i / (curve.length - 1) - 1;
+        curve[i] = Math.max(-ceiling, Math.min(ceiling, sample));
+      }
+      peakCeiling.curve = curve;
+    },
     setDevice,
     recover,
     getStatus: () => ({ connected, changingDevice, recoverable, channel: selected, fault }),

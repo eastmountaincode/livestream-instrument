@@ -52,6 +52,12 @@ function load(path) {
   return module.exports;
 }
 const { audioEngine: engine } = load('src/services/AudioEngine.ts');
+const dynamicsModes = [];
+const setDynamicsEnabled = engine.travelerDynamics.setEnabled;
+engine.travelerDynamics.setEnabled = enabled => { dynamicsModes.push(enabled); setDynamicsEnabled(enabled); };
+const peakCeilings = [];
+const setPeakCeiling = engine.outputRouter.setPeakCeiling;
+engine.outputRouter.setPeakCeiling = ceiling => { peakCeilings.push(ceiling); setPeakCeiling(ceiling); };
 const { midiService } = load('src/services/MidiService.ts');
 const storage = load('src/services/storage.ts');
 const { getTravelerSources } = load('src/music/worldTraveler.ts');
@@ -92,6 +98,8 @@ const gains = () => Array.from(engine.channels, ([id, ch]) => [id, ch.streamGain
 const send = (note, velocity = 100, status = 0x90) => midiService.handleMidiMessageEvent({ data: Uint8Array.from([status, note, velocity]), timeStamp: 0 });
 control.toggle();
 assert.equal(state[0], true);
+assert.deepEqual(dynamicsModes, [true], 'Traveler enables bus compression and limiting');
+assert.ok(Math.abs(peakCeilings[0] - Math.pow(10, -1 / 20)) < 1e-9, 'Traveler enables the final -1 dBFS ceiling');
 assert.equal(engine.sourceLevelTimer, null, 'Traveler does not start automatic source leveling');
 assert.equal(engine.sourceTransitionTimer, null, 'Traveler does not start predictive gain correction');
 for (const ch of engine.channels.values()) assert.equal(ch.sourceLevelGain.gain.value, 1, 'source correction stays bypassed');
@@ -105,6 +113,8 @@ for (let i = 0; i < 15; i++) {
   for (const [id, value] of gains()) assert.equal(value, id === slots[i].id ? engine.getStreamVolume(id) : 0, 'Tight switches without a fade');
   send(slots[i].note, 0); assert.equal(state[1], slots[i].id, 'release keeps destination selected');
 }
+assert.deepEqual(dynamicsModes, [true], 'source switching does not reconfigure or reset bus dynamics');
+assert.equal(peakCeilings.length, 1, 'source switching keeps the peak ceiling connected');
 assert.deepEqual(Array.from(engine.activeNotes.keys()), originalNotes, 'source keys do not add ordinary notes or change held chord');
 for (const note of [49, 51, 54, 56, 58, 61, 63, 66, 68, 70, 73, 75, 78]) {
   send(note); send(note, 0);
@@ -130,6 +140,8 @@ assert.equal(JSON.parse(saved).travelerVolumes[slots[0].id], .2, 'manual Travele
 assert.equal(storage.getSavedState().travelerVolumes[slots[0].id], .2, 'saved volume survives loading state');
 control.toggle();
 assert.equal(state[0], false);
+assert.deepEqual(dynamicsModes, [true, false], 'normal mode bypasses additional dynamics');
+assert.equal(peakCeilings.at(-1), null, 'normal mode restores the uncapped output route');
 assert.equal(engine.getStreamSolo(), 'original');
 assert.equal(engine.getStreamPan(slots[0].id), -.3);
 assert.equal(engine.getStreamVolume(slots[0].id), .8);
