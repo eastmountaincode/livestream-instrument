@@ -1,18 +1,20 @@
-// Input-only leveling: musical envelopes, resonance and performance volumes
-// must never feed back into the gain estimate.
-const TARGET_DB = -26;
-const SILENCE_DB = -60;
-const MAX_BOOST_DB = 18;
+// Level the measurement-only chord mix. It contains the actual filters and EQ,
+// but never musical envelopes, velocity, performance volumes or automatic gain.
+// Leave headroom for the fixed voice boost and the user's Master/Chord gain.
+const TARGET_DB = -38;
+const SILENCE_DB = -90;
+const MAX_BOOST_DB = 42;
 const MAX_CUT_DB = -36;
-const PEAK_CEILING = 0.5;
+const PEAK_CEILING = 0.125;
 
 export interface SourceLevelState {
   gainDb: number;
   signalSeconds: number;
+  calibrated: boolean;
 }
 
 export function createSourceLevelState(): SourceLevelState {
-  return { gainDb: 0, signalSeconds: 0 };
+  return { gainDb: 0, signalSeconds: 0, calibrated: false };
 }
 
 export function updateSourceLevel(
@@ -41,10 +43,11 @@ export function updateSourceLevel(
   const targetDb = Math.max(MAX_CUT_DB, Math.min(MAX_BOOST_DB,
     TARGET_DB - 20 * Math.log10(rms), 20 * Math.log10(PEAK_CEILING / peak)));
   const change = targetDb - state.gainDb;
+  if (state.signalSeconds >= 5 || (Math.abs(change) <= 1 && state.signalSeconds >= 1)) state.calibrated = true;
   // Do not chase small variations, short pauses, or the first isolated sound.
   if (Math.abs(change) > 0.5 || (change < 0 && peak * 10 ** (state.gainDb / 20) > PEAK_CEILING)) {
     if (change < 0 || state.signalSeconds >= 1) {
-      const timeConstant = change < 0 ? 0.15 : 4;
+      const timeConstant = change < 0 ? 0.15 : state.calibrated ? 4 : 0.6;
       state.gainDb += change * (1 - Math.exp(-dt / timeConstant));
     }
   }

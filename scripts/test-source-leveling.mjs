@@ -22,14 +22,14 @@ function settle(amplitude, seconds = 24) {
 }
 const quiet = settle(.02), loud = settle(.2);
 assert.ok(Math.abs(db(quiet.rms / loud.rms)) < 1.2, 'feeds 20 dB apart converge without individual faders');
-assert.ok(Math.abs(db(loud.rms) + 26) < 1.1, 'steady source approaches the target baseline');
+assert.ok(Math.abs(db(loud.rms) + 38) < 1.1, 'steady source approaches the target baseline');
 const frozen = quiet.state.gainDb;
 for (let i = 0; i < 100; i++) updateSourceLevel(quiet.state, samples(0), .2);
 assert.equal(quiet.state.gainDb, frozen, 'dropouts never increase gain');
 updateSourceLevel(quiet.state, samples(.0011), .2);
 assert.equal(quiet.state.gainDb, frozen, 'an isolated sound after silence cannot trigger boost');
-assert.equal(settle(.0001).gain, 1, 'sub-threshold hiss is not boosted');
-assert.ok(settle(.0015).gain <= 10 ** (18 / 20), 'quiet feeds have a finite boost ceiling');
+assert.equal(settle(.00001).gain, 1, 'sub-threshold hiss is not boosted');
+assert.ok(settle(.00011).gain <= 10 ** (42 / 20), 'quiet feeds have a finite boost ceiling');
 const dcState = createSourceLevelState();
 updateSourceLevel(dcState, new Float32Array(2048).fill(.4), .2);
 assert.equal(dcState.gainDb, 0, 'DC offset is not treated as useful signal');
@@ -56,7 +56,8 @@ class TestContext extends webAudioEngine.RenderingAudioContext {
     const source = this.createBufferSource();
     source.buffer = this.createBuffer(1, 48000, 48000);
     const data = source.buffer.getChannelData(0);
-    for (let i = 0; i < data.length; i++) data[i] = element.amplitude * Math.sin(2 * Math.PI * 440 * i / 48000);
+    for (let i = 0; i < data.length; i++) data[i] = element.amplitude * Math.sin(2 * Math.PI * 440 * i / 48000)
+      + (element.rumble ?? 0) * Math.sin(2 * Math.PI * 20 * i / 48000);
     source.loop = true; source.start(); return source;
   }
 }
@@ -67,23 +68,26 @@ const engine = new AudioEngine();
 engine.setToneMode('bands'); engine.setMasterVolume(.1); engine.compressor.ratio.value = 1;
 engine.addStream('quiet', { amplitude: .02 }); engine.addStream('loud', { amplitude: .2 });
 engine.setStreamVolume('quiet', .3); engine.setStreamVolume('loud', 3);
-for (const [id, amplitude] of [['quiet', .02], ['loud', .2]]) {
+for (const id of ['quiet', 'loud']) {
   const channel = engine.channels.get(id);
-  // The JS audio renderer lacks analyser waveform support; native-browser QA
-  // separately verifies the real analyser. The graph and gain are rendered here.
-  channel.rawAnalyser.getFloatTimeDomainData = bins => bins.set(samples(amplitude));
+  // This pull-based renderer needs a silent destination connection to process
+  // an analyser branch. Chromium processes unconnected analysers natively.
+  const silent = engine.ctx.createGain(); silent.gain.value = 0;
+  channel.sourceLevelAnalyser.connect(silent); silent.connect(engine.ctx.destination);
   channel.limiter.ratio.value = 1;
   engine.setStreamLevelMatch(id, false);
 }
 engine.setChordPadTight(true); engine.setTravelerSource('quiet');
 const levelTimerCount = intervals.size;
+engine.ctx.processTo(.4); engine.updateSourceLevels();
+assert.equal(engine.channels.get('quiet').sourceLevelState.gainDb, 0, 'no held notes means no calibration or boost');
+engine.noteOn(69, 100, 'chord-pad');
+await Promise.resolve();
 for (let i = 0; i < 120; i++) {
   engine.ctx.processTo(engine.ctx.currentTime + .2);
   engine.updateSourceLevels();
 }
-assert.ok(engine.channels.get('loud').sourceLevelGain.gain.value < .5, 'silent destination is calibrated before selection');
-engine.noteOn(69, 100, 'chord-pad');
-await Promise.resolve();
+assert.ok(engine.channels.get('loud').sourceLevelGain.gain.value < .5, 'unselected destination is calibrated with the held chord');
 function rms() {
   engine.ctx.processTo(engine.ctx.currentTime + .3);
   const data = engine.ctx.exportAsAudioData().channelData[0].slice(-4096);
@@ -102,9 +106,43 @@ engine.allNotesOff('chord-pad');
 engine.noteOn(69, 100, 'keyboard'); const fullKeys = rms();
 engine.updateNoteSourceVelocity(69, 50, 'keyboard'); const halfKeys = rms();
 assert.ok(Math.abs(db(halfKeys / fullKeys) + 6.02) < .3, 'Keys volume remains independent');
-assert.equal(engine.channels.get('loud').sourceLevelState.gainDb, beforeGain, 'musical gain changes never feed back into input leveling');
+assert.equal(engine.channels.get('loud').sourceLevelState.gainDb, beforeGain, 'musical gain changes never feed back into chord leveling');
+engine.allNotesOff();
+const beforeRelease = engine.channels.get('loud').sourceLevelState.gainDb;
+engine.ctx.processTo(engine.ctx.currentTime + 2); engine.updateSourceLevels();
+assert.equal(engine.channels.get('loud').sourceLevelState.gainDb, beforeRelease, 'release tails never cause makeup gain');
 engine.setTravelerSource(null); engine.ctx.processTo(engine.ctx.currentTime + 1);
 assert.equal(intervals.size, levelTimerCount - 1, 'leveling timer stops on exit');
 for (const channel of engine.channels.values()) assert.ok(Math.abs(channel.sourceLevelGain.gain.value - 1) < 1e-6, 'normal mode bypasses automatic gain');
 assert.equal(engine.getStreamVolume('quiet'), .3); assert.equal(engine.getStreamVolume('loud'), 3);
 console.log(`Rendered source levels passed: quiet ${db(quietLevel).toFixed(2)} dB, loud ${db(loudLevel).toFixed(2)} dB; source switching, Master/Chord control, timer cleanup, and saved volumes preserved.`);
+
+// Regression: equalizing broadband input energy actively misbalances sources
+// whose rumble-to-musical-signal ratio differs. Render the actual meter branch.
+const colored = new AudioEngine();
+colored.setToneMode('bands'); colored.setMasterVolume(.1); colored.compressor.ratio.value = 1;
+colored.setChordPadTight(true); colored.setTravelerSource('rumble');
+colored.addStream('rumble', { amplitude: .0005, rumble: .15 });
+colored.addStream('clear', { amplitude: .005 });
+for (const id of ['rumble', 'clear']) {
+  const ch = colored.channels.get(id);
+  const silent = colored.ctx.createGain(); silent.gain.value = 0;
+  ch.sourceLevelAnalyser.connect(silent); silent.connect(colored.ctx.destination);
+  ch.limiter.ratio.value = 1; colored.setStreamLevelMatch(id, false);
+}
+colored.noteOn(69, 100, 'chord-pad'); await Promise.resolve();
+for (let i = 0; i < 40; i++) { colored.ctx.processTo(colored.ctx.currentTime + .2); colored.updateSourceLevels(); }
+function renderedLevel() {
+  colored.ctx.processTo(colored.ctx.currentTime + .3);
+  const data = colored.ctx.exportAsAudioData().channelData[0].slice(-4096);
+  return Math.sqrt(data.reduce((s, x) => s + x * x, 0) / data.length);
+}
+const rumbleLevel = renderedLevel(); colored.setTravelerSource('clear'); const clearLevel = renderedLevel();
+assert.ok(Math.abs(db(rumbleLevel / clearLevel)) < 1.3, 'different spectra match after the actual resonators, not before them');
+assert.ok(colored.channels.get('rumble').sourceLevelState.gainDb > 25, 'quiet chord energy can receive more than the old 18 dB ceiling');
+const gainBeforePause = colored.channels.get('clear').sourceLevelState.gainDb;
+colored.channels.get('clear').audioElement.paused = true;
+colored.ctx.processTo(colored.ctx.currentTime + .4); colored.updateSourceLevels();
+assert.equal(colored.channels.get('clear').sourceLevelState.gainDb, gainBeforePause, 'paused media never increases gain');
+assert.equal(colored.channels.get('clear').sourceLevelState.signalSeconds, 0, 'resume must qualify the signal again');
+console.log(`Different-spectrum regression passed: rumble-heavy versus clear source difference ${db(rumbleLevel / clearLevel).toFixed(2)} dB.`);

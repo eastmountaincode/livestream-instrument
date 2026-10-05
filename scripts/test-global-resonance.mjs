@@ -260,6 +260,30 @@ for (const voice of audioEngine.channels.get('second').activeVoices.values()) {
 assertTravelerSound('second');
 control.updateFilterQ(70);
 assertTravelerSound('second');
+const warmed = new Set();
+let warmCalls = 0;
+for (const channel of audioEngine.channels.values()) {
+    channel.audioElement.readyState = 4; channel.audioElement.paused = false;
+    for (const voice of channel.voices) {
+        for (const filter of [voice.filter, ...voice.harmonicBands.map(band => band.filter)]) {
+            const original = filter.Q.setValueAtTime.bind(filter.Q);
+            filter.Q.setValueAtTime = (...args) => {
+                warmCalls++; warmed.add(channel); return original(...args);
+            };
+        }
+    }
+}
+for (let i = 0; i < 15; i++) {
+    warmCalls = 0;
+    audioEngine.ctx.processTo(audioEngine.ctx.currentTime + .2);
+    audioEngine.updateSourceLevels();
+    assert.ok(warmCalls <= heldNotes.length * 8, 'leveling warms at most one background filter bank per tick');
+}
+assert.equal(warmed.size, 15, 'every unselected source warms without waiting for selection');
+for (const channel of warmed) {
+    assert.equal(channel.levelMatchPending, false, 'background measurement includes current resonance compensation');
+}
+assertTravelerSound('second');
 audioEngine.setTravelerSource(null);
 audioEngine.ctx.processTo(audioEngine.ctx.currentTime + 0.08);
 for (const channel of audioEngine.channels.values()) {

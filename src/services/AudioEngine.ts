@@ -8,7 +8,7 @@ import { createAudioOutputRouter } from "./audioOutputRouter";
  * volume controls and shared global Q (resonance). Notes activate across all streams.
  *
  * Signal chain per stream:
- *   audioElement → mono → sourceLevelGain → filter(bandpass, Q) → voiceGain → streamGain → EQ → limiter → masterGain → ...
+ *   audioElement → mono → filter(bandpass, Q) → voiceGain → levelMatch → sourceLevelGain → streamGain → EQ → limiter → masterGain → ...
  *
  * Master chain:
  *   masterGain → compressor → analyser → destination
@@ -90,6 +90,7 @@ interface Voice {
   note: number;
   filter: BiquadFilterNode;
   gain: GainNode;
+  levelReferenceGain: GainNode;
   active: boolean;
   targetFrequency: number;
   snappedFrequency: number | null;
@@ -122,6 +123,9 @@ interface StreamChannel {
   sourceLevelState: SourceLevelState;
   sourceLevelSamples: Float32Array<ArrayBuffer>;
   sourceLevelUpdatedAt: number;
+  sourceLevelAnalyser: AnalyserNode;
+  sourceLevelHighPass: BiquadFilterNode;
+  sourceLevelLowPass: BiquadFilterNode;
   rawAnalyser: AnalyserNode;
   analysisBins: Float32Array<ArrayBuffer>;
   analysisUpdatedAt: number;
@@ -166,6 +170,7 @@ export class AudioEngine {
   private harmonicEvidenceResponse = 0.5;
   private analysisTimer: number | null = null;
   private sourceLevelTimer: number | null = null;
+  private sourceLevelBackgroundIndex = 0;
   private keepAliveOscillator: OscillatorNode | null = null;
   private keepAliveGain: GainNode | null = null;
 
@@ -231,15 +236,30 @@ export class AudioEngine {
 
     const streamGain = this.ctx.createGain();
     const levelMatchGain = this.ctx.createGain();
-    levelMatchGain.connect(streamGain);
+    const sourceLevelGain = this.ctx.createGain();
+    levelMatchGain.connect(sourceLevelGain);
+    sourceLevelGain.connect(streamGain);
     const rawAnalyser = this.ctx.createAnalyser();
     rawAnalyser.fftSize = ANALYSIS_FFT_SIZE;
     rawAnalyser.smoothingTimeConstant = 0.55;
     rawAnalyser.minDecibels = -100;
     rawAnalyser.maxDecibels = -10;
     monoOut.connect(rawAnalyser);
-    const sourceLevelGain = this.ctx.createGain();
-    monoOut.connect(sourceLevelGain);
+    // A measurement-only mix uses the same resonators/harmonics as the sound,
+    // but excludes note velocity, envelopes, source gates and performance faders.
+    // It never connects to the speakers or feeds the automatic gain back into itself.
+    const sourceLevelHighPass = this.ctx.createBiquadFilter();
+    sourceLevelHighPass.type = 'highpass';
+    sourceLevelHighPass.frequency.value = DEFAULT_HIGH_PASS_FREQ;
+    sourceLevelHighPass.Q.value = 0.707;
+    const sourceLevelLowPass = this.ctx.createBiquadFilter();
+    sourceLevelLowPass.type = 'lowpass';
+    sourceLevelLowPass.frequency.value = this.clampLowPassFrequency(DEFAULT_LOW_PASS_FREQ);
+    sourceLevelLowPass.Q.value = 0.707;
+    const sourceLevelAnalyser = this.ctx.createAnalyser();
+    sourceLevelAnalyser.fftSize = 8192;
+    sourceLevelHighPass.connect(sourceLevelLowPass);
+    sourceLevelLowPass.connect(sourceLevelAnalyser);
 
     const highPassFilter = this.ctx.createBiquadFilter();
     highPassFilter.type = 'highpass';
@@ -278,7 +298,11 @@ export class AudioEngine {
       const gain = this.ctx.createGain();
       gain.gain.value = 0;
 
-      sourceLevelGain.connect(filter);
+      const levelReferenceGain = this.ctx.createGain();
+      levelReferenceGain.gain.value = 0;
+      filter.connect(levelReferenceGain);
+      levelReferenceGain.connect(sourceLevelHighPass);
+      monoOut.connect(filter);
       filter.connect(gain);
       gain.connect(levelMatchGain);
 
@@ -294,9 +318,10 @@ export class AudioEngine {
 
         harmonicFilter.connect(harmonicGain);
         harmonicGain.connect(gain);
+        harmonicGain.connect(levelReferenceGain);
         harmonicBands.push({
           harmonic,
-          input: sourceLevelGain,
+          input: monoOut,
           filter: harmonicFilter,
           gain: harmonicGain,
           connected: false,
@@ -310,6 +335,7 @@ export class AudioEngine {
         note: -1,
         filter,
         gain,
+        levelReferenceGain,
         active: false,
         targetFrequency: 440,
         snappedFrequency: null,
@@ -333,7 +359,10 @@ export class AudioEngine {
       levelMatchQueued: false,
       sourceLevelGain,
       sourceLevelState: createSourceLevelState(),
-      sourceLevelSamples: new Float32Array(2048),
+      sourceLevelSamples: new Float32Array(8192),
+      sourceLevelAnalyser,
+      sourceLevelHighPass,
+      sourceLevelLowPass,
       sourceLevelUpdatedAt: now,
       rawAnalyser,
       analysisBins: new Float32Array(rawAnalyser.frequencyBinCount),
@@ -396,9 +425,13 @@ export class AudioEngine {
           try { band.filter.disconnect(); } catch { /* ok */ }
           try { band.gain.disconnect(); } catch { /* ok */ }
         }
+        try { voice.levelReferenceGain.disconnect(); } catch { /* ok */ }
         try { voice.gain.disconnect(); } catch { /* ok */ }
       }
       try { ch.source.disconnect(); } catch { /* ok */ }
+      try { ch.sourceLevelAnalyser.disconnect(); } catch { /* ok */ }
+      try { ch.sourceLevelHighPass.disconnect(); } catch { /* ok */ }
+      try { ch.sourceLevelLowPass.disconnect(); } catch { /* ok */ }
       try { ch.sourceLevelGain.disconnect(); } catch { /* ok */ }
       try { ch.rawAnalyser.disconnect(); } catch { /* ok */ }
       try { ch.levelMatchGain.disconnect(); } catch { /* ok */ }
@@ -637,8 +670,9 @@ export class AudioEngine {
   private updateSpectralSnapVoicesForChannel(
     ch: StreamChannel,
     timeConstant = 0.05,
+    includeBackground = false,
   ) {
-    if (!this.shouldAnalyzeChannel(ch) || this.toneMode !== 'spectral-snap' || ch.activeVoices.size === 0) return;
+    if ((!includeBackground && !this.shouldAnalyzeChannel(ch)) || this.toneMode !== 'spectral-snap' || ch.activeVoices.size === 0) return;
 
     this.refreshSpectralSnapPeaks(ch);
     const voices = Array.from(ch.activeVoices.values());
@@ -807,8 +841,8 @@ export class AudioEngine {
     }
   }
 
-  private updateHarmonicEvidenceVoicesForChannel(ch: StreamChannel) {
-    if (!this.shouldAnalyzeChannel(ch) || this.toneMode !== 'harmonic-evidence' || ch.activeVoices.size === 0) return;
+  private updateHarmonicEvidenceVoicesForChannel(ch: StreamChannel, includeBackground = false) {
+    if ((!includeBackground && !this.shouldAnalyzeChannel(ch)) || this.toneMode !== 'harmonic-evidence' || ch.activeVoices.size === 0) return;
     if (!this.refreshAnalysisBins(ch)) return;
 
     const now = this.ctx.currentTime;
@@ -937,6 +971,7 @@ export class AudioEngine {
     voice.gain.gain.cancelScheduledValues(now);
     voice.gain.gain.setTargetAtTime(this.getVoiceOutputGain(voice, velocity), now, voice.tight ? TIGHT_ATTACK : ATTACK);
 
+    voice.levelReferenceGain.gain.setValueAtTime(this.getVoiceOutputGain(voice, 127) / VOICE_GAIN_BOOST, now);
     ch.activeVoices.set(note, voice);
     ch.levelMatchPending = ch.levelMatch;
     this.updateSpectralSnapVoicesForChannel(ch, 0.04);
@@ -991,6 +1026,7 @@ export class AudioEngine {
     const release = voice.tight ? TIGHT_RELEASE : RELEASE;
     voice.gain.gain.setTargetAtTime(0, now, release);
     if (voice.tight) voice.gain.gain.setValueAtTime(0, now + TIGHT_RELEASE_END);
+    voice.levelReferenceGain.gain.setValueAtTime(0, now);
     voice.active = false;
     voice.note = -1;
     voice.targetFrequency = 440;
@@ -1056,6 +1092,7 @@ export class AudioEngine {
       for (const voice of ch.voices) {
         voice.gain.gain.cancelScheduledValues(now);
         voice.gain.gain.setTargetAtTime(0, now, 0.01);
+        voice.levelReferenceGain.gain.setValueAtTime(0, now);
         voice.active = false;
         voice.note = -1;
         voice.targetFrequency = 440;
@@ -1121,11 +1158,11 @@ export class AudioEngine {
     return { enabled: ch?.levelMatch ?? true, referenceQ: ch?.levelMatchReferenceQ ?? DEFAULT_Q };
   }
 
-  private updateLevelMatch(ch: StreamChannel) {
+  private updateLevelMatch(ch: StreamChannel, includeBackground = false) {
     // Freeze between edits/hits and throughout releases. Never chase an
     // envelope, muted track, or a stream going silent.
     if (!ch.levelMatch) return;
-    if (!this.shouldAnalyzeChannel(ch)) {
+    if (!includeBackground && !this.shouldAnalyzeChannel(ch)) {
       ch.levelMatchPending = true;
       return;
     }
@@ -1192,6 +1229,7 @@ export class AudioEngine {
     if (!ch) return;
     ch.highPassFreq = this.clampHighPassFrequency(freq);
     ch.highPassFilter.frequency.setTargetAtTime(ch.highPassFreq, this.ctx.currentTime, 0.01);
+    ch.sourceLevelHighPass.frequency.setTargetAtTime(ch.highPassFreq, this.ctx.currentTime, 0.01);
   }
 
   getStreamHighPass(id: string): number {
@@ -1203,6 +1241,7 @@ export class AudioEngine {
     if (!ch) return;
     ch.lowPassFreq = this.clampLowPassFrequency(freq);
     ch.lowPassFilter.frequency.setTargetAtTime(ch.lowPassFreq, this.ctx.currentTime, 0.01);
+    ch.sourceLevelLowPass.frequency.setTargetAtTime(ch.lowPassFreq, this.ctx.currentTime, 0.01);
   }
 
   getStreamLowPass(id: string): number {
@@ -1227,11 +1266,40 @@ export class AudioEngine {
   private updateSourceLevels() {
     if (this.travelerSourceId == null) return;
     const now = this.ctx.currentTime;
+    // Warm one unselected destination per tick, rather than recalculating all
+    // fifteen during every mod-wheel event. Its meter must hear the same tone
+    // and resonance compensation it will have when the source is selected.
+    const background = [...this.channels.values()].filter(ch => !this.shouldAnalyzeChannel(ch)
+      && ch.activeVoices.size && !ch.audioElement.paused && ch.audioElement.readyState >= 2);
+    if (background.length) {
+      const ch = background[this.sourceLevelBackgroundIndex++ % background.length];
+      if (ch.levelMatchPending) this.applyChannelFilterQ(ch, true);
+      this.updateHarmonicEvidenceVoicesForChannel(ch, true);
+      this.updateSpectralSnapVoicesForChannel(ch, 0.05, true);
+      if (ch.levelMatchPending) this.updateLevelMatch(ch, true);
+    }
     for (const ch of this.channels.values()) {
       const elapsed = now - ch.sourceLevelUpdatedAt;
       ch.sourceLevelUpdatedAt = now;
-      if (elapsed <= 0 || ch.audioElement.paused || ch.audioElement.readyState < 2) continue;
-      ch.rawAnalyser.getFloatTimeDomainData(ch.sourceLevelSamples);
+      if (elapsed <= 0) continue;
+      if (ch.audioElement.paused || ch.audioElement.readyState < 2) {
+        ch.sourceLevelState.signalSeconds = 0;
+        continue;
+      }
+      if (!ch.activeVoices.size) {
+        ch.sourceLevelState.signalSeconds = 0;
+        continue; // A release or a pause must not make the next hit louder.
+      }
+      for (const voice of ch.activeVoices.values()) {
+        const reference = this.getVoiceOutputGain(voice, 127) / VOICE_GAIN_BOOST;
+        if (voice.levelReferenceGain.gain.value !== reference) {
+          voice.levelReferenceGain.gain.setValueAtTime(reference, now);
+        }
+      }
+      ch.sourceLevelAnalyser.getFloatTimeDomainData(ch.sourceLevelSamples);
+      // Include the existing resonance compensation, without any user gain.
+      const resonanceGain = ch.levelMatchGain.gain.value;
+      for (let i = 0; i < ch.sourceLevelSamples.length; i++) ch.sourceLevelSamples[i] *= resonanceGain;
       const previousDb = ch.sourceLevelState.gainDb;
       const gain = updateSourceLevel(ch.sourceLevelState, ch.sourceLevelSamples, elapsed);
       if (ch.sourceLevelState.gainDb !== previousDb) {
@@ -1243,6 +1311,7 @@ export class AudioEngine {
   private setSourceLeveling(enabled: boolean) {
     if (this.sourceLevelTimer != null) window.clearInterval(this.sourceLevelTimer);
     this.sourceLevelTimer = null;
+    this.sourceLevelBackgroundIndex = 0;
     for (const ch of this.channels.values()) {
       ch.sourceLevelState = createSourceLevelState();
       ch.sourceLevelUpdatedAt = this.ctx.currentTime;
