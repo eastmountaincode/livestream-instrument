@@ -282,8 +282,8 @@ export const STREAM_CANDIDATE_SEEDS: StreamCandidate[] = ([
     pageUrl: 'https://locusonus.org/soundmap/',
     format: 'Ogg Vorbis Icecast',
     source: 'Locus Sonus / CreaCast',
-    status: 'accepted',
-    notes: 'Santiago - MAVIUC on the Locustream Soundmap.',
+    status: 'rejected',
+    notes: 'Removed from live sources on 2026-10-05: reported not working in Cicada. Santiago - MAVIUC on the Locustream Soundmap.',
   },
   {
     id: 'locus-hokkaido-maeyama',

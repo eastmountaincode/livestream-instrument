@@ -1,7 +1,7 @@
 import { DEFAULT_CHORD_VELOCITY, normalizeChordSpec, type ChordSpec, type ChordBank } from '../music/chords';
 
 const STORAGE_KEY = 'resonator-state';
-export const MAX_STREAM_VOLUME = 4;
+export const MAX_STREAM_VOLUME = 8;
 const DEFAULT_MASTER_VOLUME = 1;
 const DEFAULT_KEYBOARD_VOLUME = 1;
 const DEFAULT_CHORD_PAD_VOLUME = 1;
