@@ -109,3 +109,66 @@ export function estimateResonanceLevelMatch(
   // Limit makeup gain when the selected notes contain little input energy.
   return Math.min(8, Math.max(1 / 64, Math.sqrt(reference / current) * listeningCorrection));
 }
+
+export interface SourceResponseModel {
+  power: Float64Array;
+  perceivedPower: Float64Array;
+}
+
+// Compile the chord/EQ response once per setting change. Environmental changes
+// then need only a dot product with the continuously monitored input spectrum.
+// Extra integration points resolve passbands narrower than a single FFT bin.
+export function sourceResponseModel(
+  sampleRate: number, binCount: number, bands: ResonanceBand[], q: number,
+  highPass: number, lowPass: number, perceptualWeights: Float32Array,
+): SourceResponseModel {
+  const result = { power: new Float64Array(binCount), perceivedPower: new Float64Array(binCount) };
+  const binHz = sampleRate / (2 * binCount);
+  const valid = bands.filter(b => b.frequency > 0 && b.frequency < sampleRate / 2 && b.gain > 0);
+  const points = Array.from({ length: binCount }, (_, i) => i * binHz);
+  const prepared = valid.map(b => {
+    const center = 2 * Math.PI * b.frequency / sampleRate;
+    const alpha = Math.sin(center) / (2 * q);
+    for (const step of [-4, -2, -1, -.5, -.25, 0, .25, .5, 1, 2, 4]) {
+      const f = b.frequency + b.frequency / q * step;
+      if (f > 0 && f < (binCount - 1) * binHz) points.push(f);
+    }
+    return { cosine: Math.cos(center), referenceAlpha: alpha, currentAlpha: alpha, gain: b.gain };
+  });
+  points.sort((a, b) => a - b);
+  // These match the engine's Q=.707 high/low-pass biquads.
+  const eq = [highPass, lowPass].map(f => {
+    const w = 2 * Math.PI * f / sampleRate;
+    return { cosine: Math.cos(w), alpha: Math.sin(w) / (2 * .707) };
+  });
+  for (let i = 0; i < points.length; i++) {
+    const frequency = points[i], bin = frequency / binHz;
+    const lower = Math.min(binCount - 2, Math.floor(bin)), fraction = bin - lower;
+    const w = 2 * Math.PI * frequency / sampleRate, cosine = Math.cos(w), sine = Math.sin(w);
+    let response = responsePowers(cosine, sine, prepared)[0];
+    for (let j = 0; j < eq.length; j++) {
+      const filter = eq[j];
+      const numerator = j === 0 ? (1 + filter.cosine) * (cosine - 1) / 2
+        : (1 - filter.cosine) * (cosine + 1) / 2;
+      response *= numerator ** 2 / Math.max(1e-30, (cosine - filter.cosine) ** 2 + (filter.alpha * sine) ** 2);
+    }
+    const width = ((points[i + 1] ?? frequency) - (points[i - 1] ?? frequency)) / (2 * binHz);
+    const weight = perceptualWeights[lower] * (1 - fraction) + perceptualWeights[lower + 1] * fraction;
+    result.power[lower] += response * width * (1 - fraction);
+    result.power[lower + 1] += response * width * fraction;
+    result.perceivedPower[lower] += response * width * (1 - fraction) * weight;
+    result.perceivedPower[lower + 1] += response * width * fraction * weight;
+  }
+  return result;
+}
+
+export function predictSourceLevel(model: SourceResponseModel, powers: Float64Array, inputPower: number) {
+  let total = 0, power = 0, perceivedPower = 0;
+  for (let i = 1; i < powers.length; i++) {
+    total += powers[i];
+    power += powers[i] * model.power[i];
+    perceivedPower += powers[i] * model.perceivedPower[i];
+  }
+  const scale = total > 0 ? inputPower / total : 0;
+  return { power: power * scale, perceivedPower: perceivedPower * scale };
+}

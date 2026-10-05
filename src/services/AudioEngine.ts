@@ -1,5 +1,5 @@
 import { createSourceLevelState, updateSourceLevel, sourceLevelPower, perceivedSourcePower, sourceLoudnessWeights, DEFAULT_SOURCE_LOUDNESS_DB, type SourceLevelState } from './sourceLeveling';
-import { estimateResonanceLevelMatch, resonanceListeningTrim, type ResonanceBand } from './resonanceLevelMatch';
+import { estimateResonanceLevelMatch, resonanceListeningTrim, sourceResponseModel, predictSourceLevel, type SourceResponseModel, type ResonanceBand } from './resonanceLevelMatch';
 import { createAudioOutputRouter } from "./audioOutputRouter";
 /**
  * Resonant Filter Instrument Engine
@@ -127,6 +127,14 @@ interface StreamChannel {
   sourceLoudnessWeights: Float32Array<ArrayBuffer>;
   sourceInputSamples: Float32Array<ArrayBuffer>;
   sourceLevelUpdatedAt: number;
+  sourceInputPowers: Float64Array;
+  sourceInputPower: number;
+  sourceInputMeasuredAt: number;
+  sourcePrediction: { key: string; model: SourceResponseModel } | null;
+  sourcePredictionOffsetDb: number;
+  sourcePredictionCrest: number;
+  sourcePredictionSettledAt: number;
+  sourceTransition: { gain: number; power: number } | null;
   sourceLevelAnalyser: AnalyserNode;
   sourceLevelResonanceGain: GainNode;
   sourceLevelHighPass: BiquadFilterNode;
@@ -177,6 +185,7 @@ export class AudioEngine {
   private harmonicEvidenceResponse = 0.5;
   private analysisTimer: number | null = null;
   private sourceLevelTimer: number | null = null;
+  private sourceTransitionTimer: number | null = null;
   private sourceLevelBackgroundIndex = 0;
   private sourceLevelBackground: StreamChannel | null = null;
   private keepAliveOscillator: OscillatorNode | null = null;
@@ -386,6 +395,14 @@ export class AudioEngine {
       sourceLevelHighPass,
       sourceLevelLowPass,
       sourceLevelUpdatedAt: now,
+      sourceInputPowers: new Float64Array(4096),
+      sourceInputPower: 0,
+      sourceInputMeasuredAt: -Infinity,
+      sourcePrediction: null,
+      sourcePredictionOffsetDb: 0,
+      sourcePredictionCrest: 4,
+      sourcePredictionSettledAt: now,
+      sourceTransition: null,
       rawAnalyser,
       analysisBins: new Float32Array(rawAnalyser.frequencyBinCount),
       analysisUpdatedAt: Number.NEGATIVE_INFINITY,
@@ -1024,6 +1041,7 @@ export class AudioEngine {
       queueMicrotask(() => {
         ch.levelMatchQueued = false;
         this.updateLevelMatch(ch);
+        if (this.shouldAnalyzeChannel(ch)) this.prepareTravelerLevel(ch);
       });
     }
   }
@@ -1153,9 +1171,14 @@ export class AudioEngine {
     if (!ch) return;
     const next = Math.max(1, Math.min(100, q));
     if (next === ch.filterQ) return;
+    const previousPower = this.travelerSourceId != null && this.shouldAnalyzeChannel(ch)
+      ? this.predictTravelerLevel(ch)?.perceivedPower : undefined;
     ch.filterQ = next;
     if (ch.levelMatch) this.updateLevelMatch(ch);
-    if (this.shouldAnalyzeChannel(ch)) this.applyChannelFilterQ(ch);
+    if (this.shouldAnalyzeChannel(ch)) {
+      this.applyChannelFilterQ(ch);
+      this.prepareTravelerLevel(ch, previousPower);
+    }
   }
 
   private applyChannelFilterQ(ch: StreamChannel, immediate = false) {
@@ -1355,9 +1378,100 @@ export class AudioEngine {
     return perceivedSourcePower(ch.sourceLevelSamples, ch.sourceLevelSpectrum, ch.sourceLoudnessWeights);
   }
 
+  private monitorSourceInput(ch: StreamChannel) {
+    const now = this.ctx.currentTime;
+    if (ch.audioElement.paused || ch.audioElement.readyState < 2) {
+      ch.sourceInputPower = 0;
+      ch.sourceInputPowers.fill(0);
+      ch.sourceInputMeasuredAt = -Infinity;
+      return;
+    }
+    if (now - ch.sourceInputMeasuredAt < 0.05) return;
+    ch.sourceInputMeasuredAt = now;
+    ch.rawAnalyser.getFloatTimeDomainData(ch.sourceInputSamples);
+    ch.sourceInputPower = sourceLevelPower(ch.sourceInputSamples);
+    ch.rawAnalyser.getFloatFrequencyData(ch.sourceLevelSpectrum);
+    for (let i = 0; i < ch.sourceInputPowers.length; i++) {
+      const db = ch.sourceLevelSpectrum[i];
+      ch.sourceInputPowers[i] = Number.isFinite(db) ? 10 ** (db / 10) : 0;
+    }
+  }
+
+  private predictTravelerLevel(ch: StreamChannel) {
+    this.monitorSourceInput(ch);
+    if (ch.sourceInputPower < 1e-9 || !ch.activeVoices.size) return null;
+    const bands: ResonanceBand[] = [];
+    for (const voice of ch.activeVoices.values()) {
+      // The reference excludes velocity and musical envelopes.
+      const gain = this.getVoiceOutputGain(voice, 127) / VOICE_GAIN_BOOST;
+      bands.push({ frequency: voice.snappedFrequency ?? voice.targetFrequency, gain });
+      if (this.toneMode === 'harmonic-evidence') {
+        for (const band of voice.harmonicBands) {
+          if (band.targetGain > 0) bands.push({ frequency: voice.targetFrequency * band.harmonic, gain: gain * band.targetGain });
+        }
+      }
+    }
+    const key = JSON.stringify([ch.filterQ, ch.highPassFreq, ch.lowPassFreq, bands]);
+    if (ch.sourcePrediction?.key !== key) {
+      ch.sourcePrediction = { key, model: sourceResponseModel(this.ctx.sampleRate,
+        ch.sourceInputPowers.length, bands, ch.filterQ, ch.highPassFreq, ch.lowPassFreq, ch.sourceLoudnessWeights) };
+    }
+    const prediction = predictSourceLevel(ch.sourcePrediction.model, ch.sourceInputPowers, ch.sourceInputPower);
+    const correction = ch.levelMatchCorrection ** 2;
+    return { power: prediction.power * correction, perceivedPower: prediction.perceivedPower * correction };
+  }
+
+  private prepareTravelerLevel(ch: StreamChannel, previousPower?: number) {
+    if (this.travelerSourceId == null || this.travelerLevelTargetDb == null) return;
+    const prediction = this.predictTravelerLevel(ch);
+    if (!prediction || prediction.perceivedPower <= 1e-15) return;
+    // A resonance gesture changes the filter, not the source's environment.
+    // Cancel its predicted level change now; never route it through slow AGC.
+    const targetDb = previousPower && previousPower > 1e-15
+      ? ch.sourceLevelState.gainDb + 10 * Math.log10(previousPower / prediction.perceivedPower)
+      : this.travelerLevelTargetDb - 10 * Math.log10(prediction.perceivedPower) + ch.sourcePredictionOffsetDb;
+    // A conservative predicted crest guard complements the existing measured
+    // peak guard and audio-rate limiter. Silence can never request makeup.
+    const peakLimitDb = 20 * Math.log10(.125 / Math.max(1e-12, ch.sourcePredictionCrest * Math.sqrt(prediction.power)));
+    ch.sourceLevelState.gainDb = Math.max(-120, Math.min(72, targetDb, peakLimitDb));
+    const now = this.ctx.currentTime;
+    ch.sourceLevelGain.gain.cancelScheduledValues(now);
+    ch.sourceLevelGain.gain.setTargetAtTime(10 ** (ch.sourceLevelState.gainDb / 20), now, 0.005);
+    // Don't let an FFT window containing the previous Q undo the prediction.
+    ch.sourcePredictionSettledAt = now + this.sourceLevelWarmup(ch);
+    ch.sourceTransition = { gain: 10 ** (ch.sourceLevelState.gainDb / 20),
+      power: prediction.power * 10 ** (-ch.sourcePredictionOffsetDb / 10) };
+  }
+
+  private updateTravelerTransition() {
+    const ch = this.travelerSourceId == null ? null : this.channels.get(this.travelerSourceId);
+    if (!ch?.sourceTransition) return;
+    const now = this.ctx.currentTime, transition = ch.sourceTransition;
+    let gain = transition.gain;
+    if (now < ch.sourcePredictionSettledAt) {
+      // A Q jump can briefly ring louder than either settled response. Watch
+      // only the newest 21 ms, not the FFT window containing the old setting.
+      ch.sourceLevelAnalyser.getFloatTimeDomainData(ch.sourceLevelSamples);
+      const power = sourceLevelPower(ch.sourceLevelSamples.subarray(-1024));
+      if (power > transition.power * 1.6) gain *= Math.sqrt(transition.power * 1.6 / power);
+    } else {
+      ch.sourceTransition = null;
+    }
+    // This guard only cuts transient excess. It never boosts a filter startup
+    // or changes the stored slow correction, and never touches the source gate.
+    ch.sourceLevelGain.gain.setTargetAtTime(gain, now, 0.005);
+  }
+
   private updateSourceLevels() {
     if (this.travelerSourceId == null) return;
     const now = this.ctx.currentTime;
+    // Finish a transition before the slow controller schedules its next value.
+    // Otherwise a later fast tick could restore an obsolete gesture gain.
+    const selected = this.channels.get(this.travelerSourceId);
+    if (selected?.sourceTransition && now >= selected.sourcePredictionSettledAt) this.updateTravelerTransition();
+    // All inputs are monitored, including parked destinations. Their expensive
+    // resonator graphs remain parked; prediction reads these lightweight meters.
+    for (const ch of this.channels.values()) this.monitorSourceInput(ch);
     this.updateTravelerReference();
     // Measure only branches that actually rendered during the previous tick.
     // All media stay connected; only one silent destination warms at a time.
@@ -1376,7 +1490,17 @@ export class AudioEngine {
         continue; // A release or a pause must not make the next hit louder.
       }
       const perceivedPower = this.readSourceLoudness(ch);
-      if (this.travelerLevelTargetDb == null) continue;
+      if (this.travelerLevelTargetDb == null || now < ch.sourcePredictionSettledAt) continue;
+      const prediction = this.predictTravelerLevel(ch);
+      if (prediction && perceivedPower > 1e-15 && prediction.perceivedPower > 1e-15) {
+        // Calibrate model error against real filtered audio whenever it is
+        // available. This is independent of the slow environmental gain state.
+        let peak = 0;
+        for (const sample of ch.sourceLevelSamples) peak = Math.max(peak, Math.abs(sample));
+        ch.sourcePredictionCrest = Math.max(1, peak / Math.sqrt(Math.max(1e-24, prediction.power)));
+        ch.sourcePredictionOffsetDb = Math.max(-24, Math.min(24,
+          10 * Math.log10(prediction.perceivedPower / perceivedPower)));
+      }
       const previousDb = ch.sourceLevelState.gainDb;
       ch.rawAnalyser.getFloatTimeDomainData(ch.sourceInputSamples);
       const gain = updateSourceLevel(ch.sourceLevelState, ch.sourceLevelSamples, elapsed, this.travelerLevelTargetDb, {
@@ -1444,10 +1568,15 @@ export class AudioEngine {
   private setSourceLeveling(enabled: boolean) {
     if (this.sourceLevelTimer != null) window.clearInterval(this.sourceLevelTimer);
     this.sourceLevelTimer = null;
+    if (this.sourceTransitionTimer != null) window.clearInterval(this.sourceTransitionTimer);
+    this.sourceTransitionTimer = null;
     this.sourceLevelBackgroundIndex = 0;
     this.sourceLevelBackground = null;
     for (const ch of this.channels.values()) {
       ch.sourceLevelState = createSourceLevelState();
+      ch.sourcePredictionOffsetDb = 0;
+      ch.sourceTransition = null;
+      ch.sourcePredictionSettledAt = this.ctx.currentTime;
       ch.sourceLevelUpdatedAt = this.ctx.currentTime;
       // The Traveler gate uses DEFAULT_VOL. Compensate immediately for the
       // existing fader so entering the mode cannot change this source's level.
@@ -1456,7 +1585,10 @@ export class AudioEngine {
       ch.sourceLevelGain.gain.cancelScheduledValues(this.ctx.currentTime);
       ch.sourceLevelGain.gain.setValueAtTime(gain, this.ctx.currentTime);
     }
-    if (enabled) this.sourceLevelTimer = window.setInterval(() => this.updateSourceLevels(), 200);
+    if (enabled) {
+      this.sourceLevelTimer = window.setInterval(() => this.updateSourceLevels(), 200);
+      this.sourceTransitionTimer = window.setInterval(() => this.updateTravelerTransition(), 25);
+    }
   }
 
   private shouldAnalyzeChannel(ch: StreamChannel): boolean {
@@ -1500,6 +1632,10 @@ export class AudioEngine {
           ch.sourceLevelState.gainDb = 20 * Math.log10(Math.max(1e-6, gain));
         }
       }
+    }
+    if (wasTraveling && id != null) {
+      const selected = this.channels.get(id);
+      if (selected) this.prepareTravelerLevel(selected);
     }
     this.applyGains(wasTraveling !== (id != null));
   }

@@ -121,6 +121,7 @@ for (const id of ['quiet', 'loud']) {
   channel.limiter.ratio.value = 1;
   engine.setStreamLevelMatch(id, false);
 }
+const timersBeforeTraveler = intervals.size;
 engine.setChordPadTight(true); engine.setTravelerSource('quiet');
 const levelTimerCount = intervals.size;
 engine.ctx.processTo(.4); engine.updateSourceLevels();
@@ -140,7 +141,7 @@ function rms() {
 }
 const quietLevel = rms(); engine.setTravelerSource('loud'); const loudLevel = rms();
 assert.equal(intervals.size, levelTimerCount, 'switching destinations does not add timers');
-assert.ok(quietLevel > 1e-5 && Math.abs(db(quietLevel / loudLevel)) < 1.3, 'rendered outputs match despite source amplitudes and saved faders differing');
+assert.ok(quietLevel > 1e-5 && Math.abs(db(quietLevel / loudLevel)) < 1.3, `rendered outputs match: ${db(quietLevel/loudLevel)} dB, ${JSON.stringify([...engine.channels.values()].map(ch=>({gain:ch.sourceLevelState.gainDb,offset:ch.sourcePredictionOffsetDb,p:engine.predictTravelerLevel(ch)})))}`);
 const beforeGain = engine.channels.get('loud').sourceLevelState.gainDb;
 engine.setMasterVolume(.05); const halfMaster = rms();
 assert.ok(Math.abs(db(halfMaster / loudLevel) + 6.02) < .3, 'Master still gives an independent 6 dB cut');
@@ -156,7 +157,7 @@ const beforeRelease = engine.channels.get('loud').sourceLevelState.gainDb;
 engine.ctx.processTo(engine.ctx.currentTime + 2); engine.updateSourceLevels();
 assert.equal(engine.channels.get('loud').sourceLevelState.gainDb, beforeRelease, 'release tails never cause makeup gain');
 engine.setTravelerSource(null); engine.ctx.processTo(engine.ctx.currentTime + 1);
-assert.equal(intervals.size, levelTimerCount - 1, 'leveling timer stops on exit');
+assert.equal(intervals.size, timersBeforeTraveler, 'all leveling and transition timers stop on exit');
 for (const channel of engine.channels.values()) assert.ok(Math.abs(channel.sourceLevelGain.gain.value - 1) < 1e-6, 'normal mode bypasses automatic gain');
 assert.equal(engine.getStreamVolume('quiet'), .3); assert.equal(engine.getStreamVolume('loud'), 3);
 console.log(`Rendered source levels passed: quiet ${db(quietLevel).toFixed(2)} dB, loud ${db(loudLevel).toFixed(2)} dB; source switching, Master/Chord control, timer cleanup, and saved volumes preserved.`);
@@ -267,6 +268,8 @@ for (let i = 0; i < 180; i++) {
   maxRendering = Math.max(maxRendering, [...many.channels.values()].filter(ch => ch.rendering).length);
 }
 assert.ok(maxRendering <= 2, 'level matching never revives all fifteen DSP branches');
+assert.ok([...many.channels.values()].every(ch => many.ctx.currentTime - ch.sourceInputMeasuredAt < .21),
+  'all fifteen input meters stay current even while their resonators are parked');
 assert.ok(many.channels.get('14').sourceLevelState.signalSeconds < 10, 'inactive time is not counted as measured audio');
 const levels = [];
 for (let i = 0; i < 15; i++) {
@@ -336,3 +339,51 @@ const compensationDb=db(bassRms/midRms);
 assert.ok(compensationDb>9 && compensationDb<13,
   `different source spectra receive perceptual correction, measured ${compensationDb} dB`);
 console.log(`Perceptual source regression passed: bass versus midrange correction ${compensationDb.toFixed(2)} dB.`);
+
+// A performance gesture must be compensated before the next 200 ms AGC tick.
+// Use off-note input so a Q jump changes the extracted level dramatically.
+const instant = new AudioEngine();
+instant.setToneMode('bands'); instant.setMasterVolume(.05); instant.setChordPadTight(true);
+instant.compressor.ratio.value = 1; instant.setTravelerSource('a');
+for (const [id, amplitude] of [['a', .03], ['b', .003]]) {
+  instant.addStream(id, { amplitude, frequency: 300 });
+  const ch = instant.channels.get(id), sink = instant.ctx.createGain(); sink.gain.value = 0;
+  ch.rawAnalyser.connect(sink); ch.sourceLevelAnalyser.connect(sink); sink.connect(instant.ctx.destination);
+  ch.limiter.ratio.value = 1;
+}
+instant.setFilterQ(1); instant.noteOn(69, 127, 'chord-pad'); await Promise.resolve();
+for(let i=0;i<50;i++){instant.ctx.processTo(instant.ctx.currentTime+.2);instant.updateSourceLevels();}
+const outputLevel = seconds => {
+  const end = instant.ctx.currentTime + seconds;
+  while (instant.ctx.currentTime < end) {
+    instant.ctx.processTo(Math.min(end, instant.ctx.currentTime+.025));
+    instant.updateTravelerTransition();
+  }
+  const a=instant.ctx.exportAsAudioData().channelData[0].slice(-2048);
+  return Math.sqrt(a.reduce((sum,x)=>sum+x*x,0)/a.length);
+};
+const beforeGesture=outputLevel(.1);
+instant.setFilterQ(100);
+const afterGesture=outputLevel(.15);
+assert.ok(Math.abs(db(afterGesture/beforeGesture))<2,
+  `Q=1 to 100 responds within 150 ms: ${db(afterGesture/beforeGesture)} dB`);
+for(let i=0;i<15;i++){instant.ctx.processTo(instant.ctx.currentTime+.2);instant.updateSourceLevels();}
+const settledGesture=outputLevel(.1);
+assert.ok(Math.abs(db(settledGesture/afterGesture))<2,
+  `Q gesture must not swell afterwards: ${db(settledGesture/afterGesture)} dB`);
+// The other source has not rendered at this Q yet. Selection must predict it.
+instant.setFilterQ(1); outputLevel(.15); instant.setFilterQ(100);
+instant.setTravelerSource('b');
+const switched=outputLevel(.15);
+assert.ok(Math.abs(db(switched/beforeGesture))<2,
+  `unrendered destination at new Q is ready on selection: ${db(switched/beforeGesture)} dB`);
+instant.setFilterQ(1); const returnedQ=outputLevel(.15);
+assert.ok(Math.abs(db(returnedQ/switched))<2, `reverse sweep stays level: ${db(returnedQ/switched)} dB`);
+assert.ok([...instant.channels.values()].every(ch=>instant.ctx.currentTime-ch.sourceInputMeasuredAt<1),
+  'inactive inputs continue to be monitored');
+const frozenPrediction=instant.channels.get('a').sourceLevelState.gainDb;
+instant.channels.get('a').audioElement.paused=true;
+instant.setTravelerSource('a');
+assert.equal(instant.channels.get('a').sourceLevelState.gainDb,frozenPrediction,
+  'unavailable input cannot request predictive makeup');
+console.log(`Performance response passed: Q jump ${db(afterGesture/beforeGesture).toFixed(2)} dB; later swell ${db(settledGesture/afterGesture).toFixed(2)} dB; source switch ${db(switched/beforeGesture).toFixed(2)} dB.`);
