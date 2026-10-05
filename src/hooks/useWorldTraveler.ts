@@ -65,9 +65,17 @@ export function useWorldTraveler({ sources, wantedIds, activeIds, connect, disco
     if (slots.length === 0) return;
     const settings = new Map(Array.from(wantedIds, id => [id, activeIds.has(id) ? readSettings(id) : getStreamSettings(id) ?? readSettings(id)]));
     session.current = { wanted: new Set(wantedIds), settings, slots };
-    beginTemporaryStreamSettings(settings);
+    const travelerSettings = new Map(slots.map(slot => [
+      slot.id, settings.get(slot.id) ?? getStreamSettings(slot.id) ?? readSettings(slot.id),
+    ]));
+    beginTemporaryStreamSettings(travelerSettings);
     midiService.setKeyboardSelectionMode(true);
     const firstId = slots[0].id;
+    // Restore remembered gains before opening the first destination's gate.
+    for (const slot of slots) {
+      const volume = getStreamSettings(slot.id)?.volume;
+      if (volume !== undefined) audioEngine.setStreamVolume(slot.id, volume);
+    }
     audioEngine.setTravelerSource(firstId);
     setSelectedId(firstId);
     setEnabled(true);

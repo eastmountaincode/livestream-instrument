@@ -61,6 +61,7 @@ export interface ChordSequencerState {
 interface SavedState {
   activeStreamIds: string[];
   streams: Record<string, StreamSettings>;
+  travelerVolumes: Record<string, number>;
   soloId: string | null;
   masterVolume: number;
   globalFilterQ: number;
@@ -126,6 +127,11 @@ function normalizeSavedState(state: StoredStateInput | null): SavedState {
   return {
     activeStreamIds: Array.isArray(state?.activeStreamIds) ? state.activeStreamIds : [],
     streams,
+    travelerVolumes: Object.fromEntries(
+      Object.entries(state?.travelerVolumes ?? {})
+        .filter(([, volume]) => typeof volume === 'number' && Number.isFinite(volume))
+        .map(([id, volume]) => [id, Math.max(0, Math.min(MAX_STREAM_VOLUME, volume))])
+    ),
     globalFilterQ: Math.max(1, Math.min(100, globalFilterQ)),
     soloId: state?.soloId ?? null,
     masterVolume: typeof savedMasterVolume === 'number' && Number.isFinite(savedMasterVolume)
@@ -270,11 +276,14 @@ export function saveActiveStreams(ids: string[]): void {
   save(state);
 }
 
-// Performance-mode mixer edits are session-only; other preferences still save normally.
+// Traveler gains persist separately; other mixer edits remain temporary.
 let temporaryStreamSettings: Map<string, StreamSettings> | null = null;
 
 export function beginTemporaryStreamSettings(settings: Map<string, StreamSettings>): void {
-  temporaryStreamSettings = new Map(settings);
+  const volumes = getCurrent().travelerVolumes;
+  temporaryStreamSettings = new Map(Array.from(settings, ([id, setting]) => [
+    id, { ...setting, volume: volumes[id] ?? setting.volume },
+  ]));
 }
 
 export function endTemporaryStreamSettings(): void {
@@ -283,7 +292,11 @@ export function endTemporaryStreamSettings(): void {
 
 export function saveStreamSettings(id: string, settings: StreamSettings): void {
   if (temporaryStreamSettings) {
-    temporaryStreamSettings.set(id, { ...settings });
+    const normalized = normalizeStreamSettings(settings);
+    temporaryStreamSettings.set(id, normalized);
+    const state = getCurrent();
+    state.travelerVolumes[id] = normalized.volume;
+    save(state);
     return;
   }
   const state = getCurrent();

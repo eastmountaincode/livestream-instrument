@@ -87,11 +87,9 @@ function StreamControls({
   clock,
   onRemoveSource,
   number,
-  automaticVolume = false,
 }: {
   id: string;
   number?: number;
-  automaticVolume?: boolean;
   soloId: string | null;
   onSolo: (id: string | null) => void;
   externalVolume?: number;
@@ -242,7 +240,7 @@ function StreamControls({
           <TrackWaveform id={id} muted={muted} />
         </div>
         <div className="dev-mode dev-mode-indigo grid min-w-0 grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-3 lg:grid-cols-5">
-          {!automaticVolume && <label className="dev-mode dev-mode-green grid min-w-0 grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-black" title="Track gain">
+          <label className="dev-mode dev-mode-green grid min-w-0 grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-black" title="Track gain">
             <span className="sc-label text-[11px] font-black uppercase">Volume</span>
             <span className="sc-value text-right font-mono text-[11px] font-black text-black">{formatGain(displayedVolume)}</span>
             <input
@@ -263,7 +261,7 @@ function StreamControls({
                 persist({ volume: val });
               }}
             />
-          </label>}
+          </label>
           <label className="dev-mode dev-mode-blue grid min-w-0 grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-black" title="Stereo position">
             <span className="sc-label text-[11px] font-black uppercase">Pan</span>
             <span className="sc-value text-right font-mono text-[11px] font-black text-black">{pan === 0 ? 'C' : pan < 0 ? `L${Math.round(Math.abs(pan) * 100)}` : `R${Math.round(pan * 100)}`}</span>
@@ -417,7 +415,6 @@ export function Controls({
               key={id}
               id={id}
               number={numbered ? index + 1 : undefined}
-              automaticVolume={numbered}
               soloId={soloId}
               onSolo={onSoloChange}
               externalVolume={midiMappedVolumes[id]}
