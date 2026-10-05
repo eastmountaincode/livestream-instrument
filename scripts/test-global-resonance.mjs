@@ -243,7 +243,7 @@ function assertTravelerSound(selected) {
     assert.deepEqual(Array.from(audioEngine.getActiveNotes()), heldNotes, 'sweep preserves held notes');
     assert.equal(audioEngine.channels.size, 16, 'sweep preserves every connection');
     for (const [id, channel] of audioEngine.channels) {
-        assert.equal(channel.streamGain.gain.value, id === selected ? 0.8 : 0, 'source gate survives sweeps');
+        assert.equal(channel.streamGain.gain.value, id === selected ? audioEngine.getStreamVolume(id) : 0, 'source gate survives sweeps');
     }
 }
 for (const value of [0, 32, 64, 96, 127, 0, 127]) {
@@ -273,16 +273,17 @@ for (const channel of audioEngine.channels.values()) {
         }
     }
 }
-// High-Q destinations get a settled meter window before rotating.
-for (let i = 0; i < 85; i++) {
+// Disabling automatic leveling must also stop background filter automation.
+for (let i = 0; i < 20; i++) {
     warmCalls = 0;
     audioEngine.ctx.processTo(audioEngine.ctx.currentTime + .2);
     audioEngine.updateSourceLevels();
     assert.ok(warmCalls <= heldNotes.length * 8, 'leveling warms at most one background filter bank per tick');
 }
-assert.equal(warmed.size, 15, 'every unselected source warms without waiting for selection');
-for (const channel of warmed) {
-    assert.equal(channel.levelMatchPending, false, 'background measurement includes current resonance compensation');
+assert.equal(warmed.size, 0, 'parked sources are not calibrated while automatic leveling is off');
+for (const channel of audioEngine.channels.values()) {
+    assert.equal(channel.sourceLevelGain.gain.value, 1, 'source gain stays fixed through resonance gestures');
+    assert.equal(channel.levelMatch, true, 'resonance Level Match remains enabled');
 }
 assertTravelerSound('second');
 audioEngine.setTravelerSource(null);
@@ -305,5 +306,16 @@ assert.equal(storage.getGlobalFilterQ(), 1);
 saved = JSON.stringify({ globalFilterQ: 1000 });
 assert.equal(storage.getGlobalFilterQ(), 100);
 saved = '{}';
-assert.equal(storage.getGlobalFilterQ(), 30, 'fresh sessions retain the engine default');
+assert.equal(storage.getGlobalFilterQ(), 50.5, 'fresh sessions start at 50 percent resonance');
+saved = null;
+assert.equal(storage.getMasterVolume(), 1);
+assert.equal(storage.getKeyboardVolume(), 1);
+assert.equal(storage.getChordPadVolume(), 1);
+assert.equal(storage.getSavedState(), null, 'a fresh start has no saved sources');
+const freshEngine = new (load('src/services/AudioEngine.ts').AudioEngine)();
+freshEngine.addStream('new', {});
+assert.equal(freshEngine.getStreamVolume('new'), 1);
+assert.equal(freshEngine.getStreamPan('new'), 0);
+assert.equal(freshEngine.getMasterVolume(), 1);
+assert.equal(freshEngine.getFilterQ(), 50.5);
 console.log('Global resonance checks passed: MIDI endpoints, held voices and harmonics, new/reconnected streams, slider takeover, migration, persistence, cleanup, and pitch-bend isolation.');

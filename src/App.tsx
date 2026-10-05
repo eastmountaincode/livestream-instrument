@@ -16,7 +16,6 @@ import { useGlobalResonance } from './hooks/useGlobalResonance';
 import { midiService } from './services/MidiService';
 import { audioEngine } from './services/AudioEngine';
 import { getSavedState, getKeyboardVolume, getChordPadVolume, getChordSequencerState, saveActiveStreams, saveSoloId, getShowTravelerPlace, saveShowTravelerPlace } from './services/storage';
-import type { StreamSettings } from './services/storage';
 import { fetchAcceptedLiveSources, type LiveSource } from './services/streams';
 import {
   DEFAULT_CHORD,
@@ -27,23 +26,9 @@ import {
 
 type PanelKey = 'sources' | 'mixer' | 'keyboard' | 'chords' | 'io' | 'sequencer' | 'settings';
 
-const DEFAULT_DEMO_SOURCE_IDS = ['locus-usti-nad-labem-duul', 'locus-jasper-ridge'];
-const EMPTY_STREAM_SETTINGS: Record<string, Partial<StreamSettings>> = {};
 const SOURCE_LOAD_RETRIES = 3;
 const SOURCE_LOAD_RETRY_DELAY_MS = 700;
 const SHOW_CHORD_SEQUENCER = false;
-const DEFAULT_DEMO_STREAM_SETTINGS: Record<string, Partial<StreamSettings>> = {
-  'locus-usti-nad-labem-duul': {
-    volume: 14.87,
-    pan: -0.34,
-    octaveShift: 0,
-  },
-  'locus-jasper-ridge': {
-    volume: 11.53,
-    pan: 0.34,
-    octaveShift: 0,
-  },
-};
 
 function getInitialOpenPanels(): Record<PanelKey, boolean> {
   const compact = typeof window !== 'undefined' && window.matchMedia('(max-width: 640px)').matches;
@@ -100,7 +85,6 @@ function App() {
   }, []);
 
   const hasSavedStreams = savedStateOnLoad?.activeStreamIds?.length ?? 0;
-  const shouldStartDemo = hasSavedStreams === 0;
   const {
     activeIds,
     wantedIds,
@@ -108,7 +92,6 @@ function App() {
     connect,
     disconnect,
   } = useStreamPlayback({
-    defaultStreamSettings: shouldStartDemo ? DEFAULT_DEMO_STREAM_SETTINGS : EMPTY_STREAM_SETTINGS,
     onConnected: () => { setLoading(false); },
     onDisconnected: handleStreamDisconnected,
   });
@@ -180,11 +163,7 @@ function App() {
     if (!started || restoredStreamsRef.current || !sourcesReady) return;
     restoredStreamsRef.current = true;
 
-    const idsToConnect = savedStateOnLoad?.activeStreamIds.length
-      ? savedStateOnLoad.activeStreamIds
-      : shouldStartDemo
-        ? DEFAULT_DEMO_SOURCE_IDS
-        : [];
+    const idsToConnect = savedStateOnLoad?.activeStreamIds ?? [];
 
     for (const id of idsToConnect) {
       const source = availableSources.find(s => s.id === id);
@@ -192,7 +171,7 @@ function App() {
         void connect(source);
       }
     }
-  }, [availableSources, connect, savedStateOnLoad, shouldStartDemo, sourcesReady, started]);
+  }, [availableSources, connect, savedStateOnLoad, sourcesReady, started]);
 
   useEffect(() => {
     if (restoredStreamsRef.current && !traveler.enabled) {
@@ -346,7 +325,6 @@ function App() {
             <ChordPad
               streamConnected={streamConnected}
               inputVolume={chordPadVolume}
-              autoPlayDefaultChord={shouldStartDemo}
               onSelectionChange={setSelectedChord}
               onPerformanceEvent={setChordPerformanceEvent}
             />

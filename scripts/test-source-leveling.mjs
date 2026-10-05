@@ -108,7 +108,14 @@ class TestContext extends webAudioEngine.RenderingAudioContext {
 globalThis.AudioContext = TestContext;
 const intervals = new Map(); let timerId = 0;
 globalThis.window = { setInterval: fn => { const id = ++timerId; intervals.set(id, fn); return id; }, clearInterval: id => intervals.delete(id), setTimeout: () => 1 };
-const engine = new AudioEngine();
+// Retain coverage for the experimental leveler, explicitly opted in here.
+// Production defaults keep it off; Traveler integration tests verify bypass.
+function levelingEngine() {
+  const engine = new AudioEngine();
+  engine.sourceLevelingEnabled = true;
+  return engine;
+}
+const engine = levelingEngine();
 engine.setToneMode('bands'); engine.setMasterVolume(.1); engine.compressor.ratio.value = 1;
 engine.addStream('quiet', { amplitude: .02 }); engine.addStream('loud', { amplitude: .2 });
 engine.setStreamVolume('quiet', .3); engine.setStreamVolume('loud', 3);
@@ -164,7 +171,7 @@ console.log(`Rendered source levels passed: quiet ${db(quietLevel).toFixed(2)} d
 
 // Regression: equalizing broadband input energy actively misbalances sources
 // whose rumble-to-musical-signal ratio differs. Render the actual meter branch.
-const colored = new AudioEngine();
+const colored = levelingEngine();
 colored.setToneMode('bands'); colored.setMasterVolume(.1); colored.compressor.ratio.value = 1;
 colored.setChordPadTight(true); colored.setTravelerSource('rumble');
 colored.addStream('rumble', { amplitude: .0005, rumble: .15 });
@@ -195,7 +202,7 @@ console.log(`Different-spectrum regression passed: rumble-heavy versus clear sou
 // Regression: entering Traveler must inherit a quiet normal mix, not climb
 // toward the old fixed -38 dB reference. Exercise low and high saved faders.
 for (const [secondVolume, resonanceQ] of [[0, 30], [.0258, 30], [2.58, 30], [0, 1]]) {
-  const transition = new AudioEngine();
+  const transition = levelingEngine();
   transition.setToneMode('bands'); transition.setMasterVolume(1);
   transition.compressor.ratio.value = 1;
   transition.addStream('california', { amplitude: .0007 });
@@ -233,7 +240,7 @@ for (const [secondVolume, resonanceQ] of [[0, 30], [.0258, 30], [2.58, 30], [0, 
   console.log(`Mode transition passed: second fader ${secondVolume}, peak change ${db(maximum / normalLevel).toFixed(2)} dB, final change ${db(final / normalLevel).toFixed(2)} dB.`);
 }
 
-const deferred = new AudioEngine();
+const deferred = levelingEngine();
 deferred.setToneMode('bands');
 deferred.addStream('ready', { amplitude: .001 });
 deferred.addStream('lost', { amplitude: .001 });
@@ -251,7 +258,7 @@ console.log('Deferred entry passed: no chord waits; unavailable reference cannot
 
 // Fifteen simultaneous feeds, with weak pitch energy despite healthy input.
 // Verify the real graph's correction and that parked wall time is excluded.
-const many = new AudioEngine();
+const many = levelingEngine();
 many.setToneMode('bands'); many.setMasterVolume(.05); many.compressor.ratio.value = 1;
 many.setChordPadTight(true); many.setTravelerSource('0');
 for (let i = 0; i < 15; i++) {
@@ -297,7 +304,7 @@ console.log('Timbre reference regression passed.');
 
 // Measure the actual audible window while Q and its compensation change.
 // A post-hoc multiplication by the newest gain fails this timing contract.
-const sweep = new AudioEngine();
+const sweep = levelingEngine();
 sweep.setToneMode('bands'); sweep.setMasterVolume(.1); sweep.compressor.ratio.value = 1;
 sweep.setChordPadTight(true); sweep.setTravelerSource('meter');
 sweep.addStream('meter', { amplitude: .03, frequency: 300 });
@@ -320,7 +327,7 @@ for (const q of [1, 2, 10, 30, 100, 2, 95]) {
 assert.ok(maxMeterError < .5, 'leveler measures the audible compensated window throughout a resonance sweep');
 console.log(`Resonance meter regression passed: ${maxMeterError.toFixed(2)} dB maximum tracking error.`);
 
-const perceived = new AudioEngine();
+const perceived = levelingEngine();
 perceived.setToneMode('bands'); perceived.setMasterVolume(.05); perceived.compressor.ratio.value = 1;
 perceived.setChordPadTight(true); perceived.setTravelerSource('bass');
 for (const [id, frequency] of [['bass', 165], ['mid', 660]]) {
@@ -342,7 +349,7 @@ console.log(`Perceptual source regression passed: bass versus midrange correctio
 
 // A performance gesture must be compensated before the next 200 ms AGC tick.
 // Use off-note input so a Q jump changes the extracted level dramatically.
-const instant = new AudioEngine();
+const instant = levelingEngine();
 instant.setToneMode('bands'); instant.setMasterVolume(.05); instant.setChordPadTight(true);
 instant.compressor.ratio.value = 1; instant.setTravelerSource('a');
 for (const [id, amplitude] of [['a', .03], ['b', .003]]) {

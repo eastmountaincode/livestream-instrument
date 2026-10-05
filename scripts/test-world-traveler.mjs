@@ -88,13 +88,17 @@ const gains = () => Array.from(engine.channels, ([id, ch]) => [id, ch.streamGain
 const send = (note, velocity = 100, status = 0x90) => midiService.handleMidiMessageEvent({ data: Uint8Array.from([status, note, velocity]), timeStamp: 0 });
 control.toggle();
 assert.equal(state[0], true);
+assert.equal(engine.sourceLevelTimer, null, 'Traveler does not start automatic source leveling');
+assert.equal(engine.sourceTransitionTimer, null, 'Traveler does not start predictive gain correction');
+for (const ch of engine.channels.values()) assert.equal(ch.sourceLevelGain.gain.value, 1, 'source correction stays bypassed');
+
 assert.equal(connections.length, 15, 'connect all fixed destinations');
 advance();
-for (const [id, value] of gains()) assert.equal(value, id === slots[0].id ? .8 : 0, 'background sources are silent');
+for (const [id, value] of gains()) assert.equal(value, id === slots[0].id ? engine.getStreamVolume(id) : 0, 'background sources are silent');
 for (let i = 0; i < 15; i++) {
   send(slots[i].note, i + 1); advance();
   assert.equal(state[1], slots[i].id, 'quiet key presses select the corresponding destination');
-  for (const [id, value] of gains()) assert.equal(value, id === slots[i].id ? .8 : 0, 'Tight switches without a fade');
+  for (const [id, value] of gains()) assert.equal(value, id === slots[i].id ? engine.getStreamVolume(id) : 0, 'Tight switches without a fade');
   send(slots[i].note, 0); assert.equal(state[1], slots[i].id, 'release keeps destination selected');
 }
 assert.deepEqual(Array.from(engine.activeNotes.keys()), originalNotes, 'source keys do not add ordinary notes or change held chord');
@@ -168,16 +172,17 @@ assert.equal(spectrumReads.size, 15, 'leaving Traveler restores analysis for eve
 // must stop rendering, while media connections and held notes remain intact.
 engine.setTravelerSource(slots[0].id);
 const warmed = new Set();
-// Allow at most one second of filter settling per background destination.
+// Repeated former calibration ticks must not restart automatic adjustment.
 for (let tick = 0; tick < 80; tick++) {
   engine.ctx.processTo(engine.ctx.currentTime + .2);
   engine.updateSourceLevels();
   const rendering = [...engine.channels].filter(([, ch]) => ch.rendering);
-  assert.ok(rendering.length <= 2, 'only selected and one calibration source render chords');
+  assert.ok(rendering.length <= 2, 'only selected and any releasing source render chords');
   assert.ok(engine.channels.get(slots[0].id).rendering, 'selected source always renders');
   for (const [id] of rendering) warmed.add(id);
 }
-assert.equal(warmed.size, 15, 'background calibration visits every destination');
+assert.equal(warmed.size, 1, 'automatic calibration never wakes parked sources');
+for (const ch of engine.channels.values()) assert.equal(ch.sourceLevelGain.gain.value, 1, 'no volume swell over time');
 for (const slot of slots) {
   engine.setTravelerSource(slot.id);
   assert.ok(engine.channels.get(slot.id).rendering, 'source switching immediately restores processing');

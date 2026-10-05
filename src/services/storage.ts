@@ -3,8 +3,8 @@ import { DEFAULT_CHORD_VELOCITY, normalizeChordSpec, type ChordSpec, type ChordB
 const STORAGE_KEY = 'resonator-state';
 export const MAX_STREAM_VOLUME = 4;
 const DEFAULT_MASTER_VOLUME = 1;
-const DEFAULT_KEYBOARD_VOLUME = 3.2;
-const DEFAULT_CHORD_PAD_VOLUME = 1.55;
+const DEFAULT_KEYBOARD_VOLUME = 1;
+const DEFAULT_CHORD_PAD_VOLUME = 1;
 const DEFAULT_HIGH_PASS_FREQ = 20;
 const DEFAULT_LOW_PASS_FREQ = 20000;
 const DEFAULT_HARMONIC_EVIDENCE_SETTINGS: HarmonicEvidenceSettings = {
@@ -121,7 +121,7 @@ function normalizeSavedState(state: StoredStateInput | null): SavedState {
     .find(q => typeof q === 'number' && Number.isFinite(q));
   const globalFilterQ = typeof state?.globalFilterQ === 'number' && Number.isFinite(state.globalFilterQ)
     ? state.globalFilterQ
-    : legacyFilterQ ?? 30;
+    : legacyFilterQ ?? 50.5;
 
   return {
     activeStreamIds: Array.isArray(state?.activeStreamIds) ? state.activeStreamIds : [],
@@ -172,13 +172,13 @@ function normalizeHarmonicEvidenceSettings(value: unknown): HarmonicEvidenceSett
 
 function normalizeStreamSettings(settings: Partial<StreamSettings>): StreamSettings {
   return {
-    filterQ: typeof settings.filterQ === 'number' && Number.isFinite(settings.filterQ) ? settings.filterQ : 30,
+    filterQ: typeof settings.filterQ === 'number' && Number.isFinite(settings.filterQ) ? settings.filterQ : 50.5,
     levelMatch: settings.levelMatch !== false,
     levelMatchReferenceQ: typeof settings.levelMatchReferenceQ === 'number' && Number.isFinite(settings.levelMatchReferenceQ)
       ? Math.max(1, Math.min(100, settings.levelMatchReferenceQ))
-      : Math.max(1, Math.min(100, typeof settings.filterQ === 'number' && Number.isFinite(settings.filterQ) ? settings.filterQ : 30)),
+      : Math.max(1, Math.min(100, typeof settings.filterQ === 'number' && Number.isFinite(settings.filterQ) ? settings.filterQ : 50.5)),
     volume: typeof settings.volume === 'number' && Number.isFinite(settings.volume)
-      ? Math.max(0, Math.min(MAX_STREAM_VOLUME, settings.volume)) : 0.8,
+      ? Math.max(0, Math.min(MAX_STREAM_VOLUME, settings.volume)) : 1,
     highPassFreq: typeof settings.highPassFreq === 'number' && Number.isFinite(settings.highPassFreq) ? settings.highPassFreq : DEFAULT_HIGH_PASS_FREQ,
     lowPassFreq: typeof settings.lowPassFreq === 'number' && Number.isFinite(settings.lowPassFreq) ? settings.lowPassFreq : DEFAULT_LOW_PASS_FREQ,
     pan: typeof settings.pan === 'number' && Number.isFinite(settings.pan) ? settings.pan : 0,

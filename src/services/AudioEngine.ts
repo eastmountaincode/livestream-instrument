@@ -19,7 +19,8 @@ import {
 } from './audioOutput';
 
 const VOICES_PER_STREAM = 16;
-const DEFAULT_Q = 30;
+const DEFAULT_Q = 50.5;
+const DEFAULT_STREAM_VOLUME = 1;
 const DEFAULT_VOL = 0.8;
 const DEFAULT_HIGH_PASS_FREQ = 20;
 const DEFAULT_LOW_PASS_FREQ = 20000;
@@ -184,6 +185,10 @@ export class AudioEngine {
   private harmonicEvidenceColor = 0;
   private harmonicEvidenceResponse = 0.5;
   private analysisTimer: number | null = null;
+  // Keep the experimental leveler available internally, but off for performance.
+  // Resonance Level Match is independent and remains enabled.
+  private sourceLevelingEnabled = false;
+  private travelerSwitchSerial = 0;
   private sourceLevelTimer: number | null = null;
   private sourceTransitionTimer: number | null = null;
   private sourceLevelBackgroundIndex = 0;
@@ -195,7 +200,7 @@ export class AudioEngine {
     this.ctx = new AudioContext();
 
     this.masterGain = this.ctx.createGain();
-    this.masterGain.gain.value = 0.8;
+    this.masterGain.gain.value = 1;
 
     this.compressor = this.ctx.createDynamicsCompressor();
     this.compressor.threshold.value = -20;
@@ -373,7 +378,7 @@ export class AudioEngine {
     // Fade in
     const now = this.ctx.currentTime;
     streamGain.gain.setValueAtTime(0, now);
-    streamGain.gain.linearRampToValueAtTime(DEFAULT_VOL, now + FADE_TIME);
+    streamGain.gain.linearRampToValueAtTime(DEFAULT_STREAM_VOLUME, now + FADE_TIME);
 
     this.channels.set(id, {
       source,
@@ -418,7 +423,7 @@ export class AudioEngine {
       rendering: true,
       renderingSince: now,
       filterQ: this.filterQ,
-      volume: DEFAULT_VOL,
+      volume: DEFAULT_STREAM_VOLUME,
       highPassFreq: DEFAULT_HIGH_PASS_FREQ,
       lowPassFreq: DEFAULT_LOW_PASS_FREQ,
       octaveShift: 0,
@@ -1171,7 +1176,7 @@ export class AudioEngine {
     if (!ch) return;
     const next = Math.max(1, Math.min(100, q));
     if (next === ch.filterQ) return;
-    const previousPower = this.travelerSourceId != null && this.shouldAnalyzeChannel(ch)
+    const previousPower = this.sourceLevelingEnabled && this.travelerSourceId != null && this.shouldAnalyzeChannel(ch)
       ? this.predictTravelerLevel(ch)?.perceivedPower : undefined;
     ch.filterQ = next;
     if (ch.levelMatch) this.updateLevelMatch(ch);
@@ -1265,7 +1270,7 @@ export class AudioEngine {
       for (let i = 0; i < spectrum.length; i++) spectrum[i] += 20 * Math.log10(Math.max(1e-12, magnitude[i]));
     }
     const correction = estimateResonanceLevelMatch(spectrum, this.ctx.sampleRate,
-      bands, ch.levelMatchReferenceQ, ch.filterQ, this.travelerSourceId == null);
+      bands, ch.levelMatchReferenceQ, ch.filterQ, !this.sourceLevelingEnabled || this.travelerSourceId == null);
     if (correction === null) { ch.levelMatchPending = true; return; }
     this.setLevelMatchCorrection(ch, correction);
     ch.levelMatchPending = false;
@@ -1283,7 +1288,7 @@ export class AudioEngine {
   }
 
   getStreamVolume(id: string): number {
-    return this.channels.get(id)?.volume ?? DEFAULT_VOL;
+    return this.channels.get(id)?.volume ?? DEFAULT_STREAM_VOLUME;
   }
 
   private clampHighPassFrequency(freq: number): number {
@@ -1422,7 +1427,7 @@ export class AudioEngine {
   }
 
   private prepareTravelerLevel(ch: StreamChannel, previousPower?: number) {
-    if (this.travelerSourceId == null || this.travelerLevelTargetDb == null) return;
+    if (!this.sourceLevelingEnabled || this.travelerSourceId == null || this.travelerLevelTargetDb == null) return;
     const prediction = this.predictTravelerLevel(ch);
     if (!prediction || prediction.perceivedPower <= 1e-15) return;
     // A resonance gesture changes the filter, not the source's environment.
@@ -1463,7 +1468,7 @@ export class AudioEngine {
   }
 
   private updateSourceLevels() {
-    if (this.travelerSourceId == null) return;
+    if (!this.sourceLevelingEnabled || this.travelerSourceId == null) return;
     const now = this.ctx.currentTime;
     // Finish a transition before the slow controller schedules its next value.
     // Otherwise a later fast tick could restore an obsolete gesture gain.
@@ -1566,6 +1571,7 @@ export class AudioEngine {
   }
 
   private setSourceLeveling(enabled: boolean) {
+    enabled = enabled && this.sourceLevelingEnabled;
     if (this.sourceLevelTimer != null) window.clearInterval(this.sourceLevelTimer);
     this.sourceLevelTimer = null;
     if (this.sourceTransitionTimer != null) window.clearInterval(this.sourceTransitionTimer);
@@ -1599,7 +1605,7 @@ export class AudioEngine {
     if (this.travelerSourceId === id) return;
     const previous = this.travelerSourceId == null ? null : this.channels.get(this.travelerSourceId);
     const wasTraveling = this.travelerSourceId != null;
-    if (!wasTraveling && id != null) this.captureTravelerReference();
+    if (this.sourceLevelingEnabled && !wasTraveling && id != null) this.captureTravelerReference();
     this.travelerSourceId = id;
     if (wasTraveling !== (id != null)) this.setSourceLeveling(id != null);
     // Keep the previous source connected for its existing soft release. The
@@ -1614,7 +1620,7 @@ export class AudioEngine {
     for (const ch of this.channels.values()) {
       if (this.shouldAnalyzeChannel(ch) || wasTraveling !== (id != null)) {
         const previousCorrection = ch.levelMatchGain.gain.value;
-        if (wasTraveling !== (id != null) && ch.levelMatch && !ch.levelMatchPending) {
+        if (this.sourceLevelingEnabled && wasTraveling !== (id != null) && ch.levelMatch && !ch.levelMatchPending) {
           // Changing modes changes the listening trim, not the input spectrum.
           // Preserve the existing correction instead of re-estimating the mix.
           const trim = resonanceListeningTrim(ch.levelMatchReferenceQ, ch.filterQ);
@@ -1622,7 +1628,7 @@ export class AudioEngine {
         } else {
           this.updateLevelMatch(ch);
         }
-        if (!wasTraveling && id != null) {
+        if (this.sourceLevelingEnabled && !wasTraveling && id != null) {
           // Traveler uses a common energy target, without the normal-mode
           // broad-resonance listening trim. Preserve the entry level as that
           // correction changes; the source leveler then holds the same target.
@@ -1638,6 +1644,16 @@ export class AudioEngine {
       if (selected) this.prepareTravelerLevel(selected);
     }
     this.applyGains(wasTraveling !== (id != null));
+    const serial = ++this.travelerSwitchSerial;
+    if (!this.sourceLevelingEnabled && this.sourceLevelBackground) {
+      // With the calibration timer off, park the previous source after its
+      // existing 10 ms source-gate release has finished.
+      window.setTimeout(() => {
+        if (serial !== this.travelerSwitchSerial) return;
+        this.sourceLevelBackground = null;
+        this.syncChannelRendering();
+      }, 100);
+    }
   }
 
   private soloId: string | null = null;
@@ -1657,7 +1673,7 @@ export class AudioEngine {
     for (const [id, ch] of this.channels) {
       const traveling = this.travelerSourceId != null;
       const audible = traveling ? id === this.travelerSourceId && !ch.muted : soloId ? id === soloId : !ch.muted;
-      const volume = traveling ? DEFAULT_VOL : ch.volume;
+      const volume = traveling && this.sourceLevelingEnabled ? DEFAULT_VOL : ch.volume;
       const currentGain = ch.streamGain.gain.value;
       ch.streamGain.gain.cancelScheduledValues(now);
       ch.streamGain.gain.setValueAtTime(currentGain, now);
@@ -1763,7 +1779,7 @@ export class AudioEngine {
   }
 
   setMasterVolume(vol: number) {
-    const safeVolume = Number.isFinite(vol) ? Math.max(0, vol) : 0.8;
+    const safeVolume = Number.isFinite(vol) ? Math.max(0, vol) : 1;
     this.masterGain.gain.setTargetAtTime(safeVolume, this.ctx.currentTime, 0.01);
   }
 
