@@ -1,3 +1,4 @@
+import { normalizeGlobalFilters, type GlobalFilters } from './globalFilters';
 import { DEFAULT_CHORD_VELOCITY, normalizeChordSpec, type ChordSpec, type ChordBank } from '../music/chords';
 
 const STORAGE_KEY = 'resonator-state';
@@ -65,6 +66,7 @@ interface SavedState {
   soloId: string | null;
   masterVolume: number;
   globalFilterQ: number;
+  globalFilters: GlobalFilters;
   keyboardVolume: number;
   midiKeyboardEnabled: boolean;
   chordPadVolume: number;
@@ -132,6 +134,7 @@ function normalizeSavedState(state: StoredStateInput | null): SavedState {
         .filter(([, volume]) => typeof volume === 'number' && Number.isFinite(volume))
         .map(([id, volume]) => [id, Math.max(0, Math.min(MAX_STREAM_VOLUME, volume))])
     ),
+    globalFilters: normalizeGlobalFilters(state?.globalFilters),
     globalFilterQ: Math.max(1, Math.min(100, globalFilterQ)),
     soloId: state?.soloId ?? null,
     masterVolume: typeof savedMasterVolume === 'number' && Number.isFinite(savedMasterVolume)
@@ -322,6 +325,16 @@ export function saveMasterVolume(masterVolume: number): void {
 
 export function getMasterVolume(): number {
   return getCurrent().masterVolume;
+}
+
+export function getGlobalFilters(): GlobalFilters {
+  return getCurrent().globalFilters;
+}
+
+export function saveGlobalFilters(filters: GlobalFilters): void {
+  const state = getCurrent();
+  state.globalFilters = normalizeGlobalFilters(filters);
+  save(state);
 }
 
 export function saveGlobalFilterQ(q: number): void {

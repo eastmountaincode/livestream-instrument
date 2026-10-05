@@ -29,8 +29,6 @@ function restoreSettings(id: string, settings: StreamSettings) {
   audioEngine.setStreamLevelMatch(id, settings.levelMatch, settings.levelMatchReferenceQ);
   audioEngine.setStreamVolume(id, settings.volume);
   audioEngine.setStreamPan(id, settings.pan);
-  audioEngine.setStreamHighPass(id, settings.highPassFreq);
-  audioEngine.setStreamLowPass(id, settings.lowPassFreq);
   audioEngine.setStreamOctave(id, settings.octaveShift);
   audioEngine.setStreamMuted(id, settings.muted);
 }

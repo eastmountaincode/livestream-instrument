@@ -12,6 +12,7 @@ import { MidiPanel } from './components/MidiPanel';
 import { SettingsPanel } from './components/SettingsPanel';
 import { Panel } from './components/ui';
 import { useStreamPlayback } from './hooks/useStreamPlayback';
+import { useGlobalFilters } from './hooks/useGlobalFilters';
 import { useGlobalResonance } from './hooks/useGlobalResonance';
 import { midiService } from './services/MidiService';
 import { audioEngine } from './services/AudioEngine';
@@ -50,6 +51,7 @@ function wait(ms: number): Promise<void> {
 
 function App() {
   const { filterQ, updateFilterQ } = useGlobalResonance();
+  const { filters, updateFilters } = useGlobalFilters();
   const [savedStateOnLoad] = useState(() => getSavedState());
   const restoredStreamsRef = useRef(false);
   const [started, setStarted] = useState(false);
@@ -300,6 +302,8 @@ function App() {
           <Controls
             key={traveler.enabled ? 'traveler' : 'normal'}
             numbered={traveler.enabled}
+            filters={filters}
+            onFiltersChange={updateFilters}
             filterQ={filterQ}
             onFilterQChange={updateFilterQ}
             activeSourceIds={traveler.enabled ? travelerMixerIds : activeIds}

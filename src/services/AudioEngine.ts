@@ -1,3 +1,4 @@
+import { normalizeGlobalFilters, type GlobalFilters } from './globalFilters';
 import { createSourceLevelState, updateSourceLevel, sourceLevelPower, perceivedSourcePower, sourceLoudnessWeights, DEFAULT_SOURCE_LOUDNESS_DB, type SourceLevelState } from './sourceLeveling';
 import { estimateResonanceLevelMatch, resonanceListeningTrim, sourceResponseModel, predictSourceLevel, type SourceResponseModel, type ResonanceBand } from './resonanceLevelMatch';
 import { createAudioOutputRouter } from "./audioOutputRouter";
@@ -179,6 +180,7 @@ export class AudioEngine {
 
   private channels: Map<string, StreamChannel> = new Map();
   private filterQ = DEFAULT_Q;
+  private globalFilters = normalizeGlobalFilters(null);
   private activeNotes: Map<number, ActiveNoteState> = new Map();
   private externalClock = false;
   private chordPadTight = false;
@@ -201,6 +203,7 @@ export class AudioEngine {
 
   constructor() {
     this.ctx = new AudioContext();
+    this.globalFilters = normalizeGlobalFilters(null, this.ctx.sampleRate / 2 - 1);
 
     this.masterGain = this.ctx.createGain();
     this.masterGain.gain.value = 1;
@@ -283,11 +286,11 @@ export class AudioEngine {
     // It never connects to the speakers or feeds the automatic gain back into itself.
     const sourceLevelHighPass = this.ctx.createBiquadFilter();
     sourceLevelHighPass.type = 'highpass';
-    sourceLevelHighPass.frequency.value = DEFAULT_HIGH_PASS_FREQ;
+    sourceLevelHighPass.frequency.value = this.globalFilters.highPassFreq;
     sourceLevelHighPass.Q.value = 0.707;
     const sourceLevelLowPass = this.ctx.createBiquadFilter();
     sourceLevelLowPass.type = 'lowpass';
-    sourceLevelLowPass.frequency.value = this.clampLowPassFrequency(DEFAULT_LOW_PASS_FREQ);
+    sourceLevelLowPass.frequency.value = this.clampLowPassFrequency(this.globalFilters.lowPassFreq);
     sourceLevelLowPass.Q.value = 0.707;
     const sourceLevelAnalyser = this.ctx.createAnalyser();
     sourceLevelAnalyser.fftSize = 8192;
@@ -299,11 +302,11 @@ export class AudioEngine {
 
     const highPassFilter = this.ctx.createBiquadFilter();
     highPassFilter.type = 'highpass';
-    highPassFilter.frequency.value = DEFAULT_HIGH_PASS_FREQ;
+    highPassFilter.frequency.value = this.globalFilters.highPassFreq;
     highPassFilter.Q.value = 0.707;
     const lowPassFilter = this.ctx.createBiquadFilter();
     lowPassFilter.type = 'lowpass';
-    lowPassFilter.frequency.value = this.clampLowPassFrequency(DEFAULT_LOW_PASS_FREQ);
+    lowPassFilter.frequency.value = this.clampLowPassFrequency(this.globalFilters.lowPassFreq);
     lowPassFilter.Q.value = 0.707;
     const limiter = this.ctx.createDynamicsCompressor();
     limiter.threshold.value = TRACK_LIMITER_THRESHOLD_DB;
@@ -429,8 +432,8 @@ export class AudioEngine {
       renderingSince: now,
       filterQ: this.filterQ,
       volume: DEFAULT_STREAM_VOLUME,
-      highPassFreq: DEFAULT_HIGH_PASS_FREQ,
-      lowPassFreq: DEFAULT_LOW_PASS_FREQ,
+      highPassFreq: this.globalFilters.highPassFreq,
+      lowPassFreq: this.globalFilters.lowPassFreq,
       octaveShift: 0,
       muted: false,
       pan: 0,
@@ -1294,6 +1297,18 @@ export class AudioEngine {
 
   getStreamVolume(id: string): number {
     return this.channels.get(id)?.volume ?? DEFAULT_STREAM_VOLUME;
+  }
+
+  setGlobalFilters(filters: GlobalFilters) {
+    this.globalFilters = normalizeGlobalFilters(filters, this.ctx.sampleRate / 2 - 1);
+    for (const id of this.channels.keys()) {
+      this.setStreamHighPass(id, this.globalFilters.highPassFreq);
+      this.setStreamLowPass(id, this.globalFilters.lowPassFreq);
+    }
+  }
+
+  getGlobalFilters(): GlobalFilters {
+    return { ...this.globalFilters };
   }
 
   private clampHighPassFrequency(freq: number): number {

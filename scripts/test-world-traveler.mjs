@@ -134,6 +134,7 @@ engine.setStreamPan(slots[0].id, .75);
 engine.setStreamVolume(slots[0].id, .2);
 storage.saveStreamSettings(slots[0].id, { ...storage.getStreamSettings(slots[0].id), pan: .75, volume: .2 });
 storage.saveMasterVolume(.4);
+engine.setGlobalFilters({ highPassFreq: 120, lowPassFreq: 6000 });
 assert.equal(JSON.parse(saved).streams[slots[0].id], undefined, 'Traveler edits never overwrite the normal mix');
 assert.equal(storage.getStreamSettings(slots[0].id).pan, .75, 'reconnection sees temporary settings');
 assert.equal(JSON.parse(saved).travelerVolumes[slots[0].id], .2, 'manual Traveler volume is saved separately');
@@ -145,6 +146,8 @@ assert.equal(peakCeilings.at(-1), null, 'normal mode restores the uncapped outpu
 assert.equal(engine.getStreamSolo(), 'original');
 assert.equal(engine.getStreamPan(slots[0].id), -.3);
 assert.equal(engine.getStreamVolume(slots[0].id), .8);
+assert.equal(engine.getStreamHighPass(slots[0].id), 120, 'mode exit does not restore old per-track high-pass');
+assert.equal(engine.getStreamLowPass(slots[0].id), 6000, 'mode exit does not restore old per-track low-pass');
 assert.equal(disconnected.length, 14, 'only mode-added destinations are disconnected');
 assert.equal(storage.getStreamSettings(slots[0].id), null, 'temporary settings discarded');
 assert.equal(JSON.parse(saved).masterVolume, .4, 'other intentional preference changes survive');

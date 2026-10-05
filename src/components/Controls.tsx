@@ -16,9 +16,12 @@ import {
   saveHarmonicEvidenceSettings,
   type HarmonicEvidenceSettings,
 } from '../services/storage';
+import type { GlobalFilters } from '../services/globalFilters';
 import { formatCategory, formatLocalTime } from '../utils/format';
 
 interface Props {
+  filters: GlobalFilters;
+  onFiltersChange: (filters: GlobalFilters) => void;
   filterQ: number;
   onFilterQChange: (q: number) => void;
   activeSourceIds: Set<string>;
@@ -106,8 +109,6 @@ function StreamControls({
   // Load saved settings once and use as initial state
   const [saved] = useState(() => getStreamSettings(id));
   const [vol, setVol] = useState(() => saved?.volume ?? audioEngine.getStreamVolume(id));
-  const [highPassFreq, setHighPassFreq] = useState(() => saved?.highPassFreq ?? audioEngine.getStreamHighPass(id));
-  const [lowPassFreq, setLowPassFreq] = useState(() => saved?.lowPassFreq ?? audioEngine.getStreamLowPass(id));
   const [oct, setOct] = useState(() => saved?.octaveShift ?? audioEngine.getStreamOctave(id));
   const [pan, setPan] = useState(() => saved?.pan ?? audioEngine.getStreamPan(id));
   const [muted, setMuted] = useState(() => saved?.muted ?? audioEngine.getStreamMuted(id));
@@ -118,26 +119,24 @@ function StreamControls({
     initRef.current = true;
     audioEngine.setStreamLevelMatch(id, true, saved.levelMatchReferenceQ);
     audioEngine.setStreamVolume(id, saved.volume);
-    audioEngine.setStreamHighPass(id, saved.highPassFreq);
-    audioEngine.setStreamLowPass(id, saved.lowPassFreq);
     audioEngine.setStreamPan(id, saved.pan);
     audioEngine.setStreamOctave(id, saved.octaveShift);
     audioEngine.setStreamMuted(id, saved.muted);
   }, [id, saved]);
 
-  const persist = useCallback((overrides: Partial<{ volume: number; highPassFreq: number; lowPassFreq: number; pan: number; octaveShift: number; muted: boolean }>) => {
+  const persist = useCallback((overrides: Partial<{ volume: number; pan: number; octaveShift: number; muted: boolean }>) => {
     saveStreamSettings(id, {
       filterQ: audioEngine.getFilterQ(),
       levelMatch: audioEngine.getStreamLevelMatch(id).enabled,
       levelMatchReferenceQ: audioEngine.getStreamLevelMatch(id).referenceQ,
       volume: overrides.volume ?? audioEngine.getStreamVolume(id),
-      highPassFreq: overrides.highPassFreq ?? highPassFreq,
-      lowPassFreq: overrides.lowPassFreq ?? lowPassFreq,
+      highPassFreq: audioEngine.getGlobalFilters().highPassFreq,
+      lowPassFreq: audioEngine.getGlobalFilters().lowPassFreq,
       pan: overrides.pan ?? pan,
       octaveShift: overrides.octaveShift ?? oct,
       muted: overrides.muted ?? muted,
     });
-  }, [id, highPassFreq, lowPassFreq, pan, oct, muted]);
+  }, [id, pan, oct, muted]);
 
   const displayedVolume = externalVolume ?? vol;
 
@@ -280,42 +279,7 @@ function StreamControls({
               }}
             />
           </label>
-          <label className="dev-mode dev-mode-orange grid min-w-0 grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-black" title="High-pass filter">
-            <span className="sc-label text-[11px] font-black uppercase">High Pass</span>
-            <span className="sc-value text-right font-mono text-[11px] font-black text-black">{formatFrequency(highPassFreq)}</span>
-            <input
-              type="range"
-              min="0"
-              max="100"
-              step="0.1"
-              value={frequencyToSliderValue(highPassFreq)}
-              className="col-span-2 w-full min-w-0"
-              onChange={e => {
-                const next = Math.max(MIN_EQ_FREQ, Math.min(sliderValueToFrequency(parseFloat(e.target.value)), lowPassFreq - 10));
-                setHighPassFreq(next);
-                audioEngine.setStreamHighPass(id, next);
-                persist({ highPassFreq: next });
-              }}
-            />
-          </label>
-          <label className="dev-mode dev-mode-yellow grid min-w-0 grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-black" title="Low-pass filter">
-            <span className="sc-label text-[11px] font-black uppercase">Low Pass</span>
-            <span className="sc-value text-right font-mono text-[11px] font-black text-black">{formatFrequency(lowPassFreq)}</span>
-            <input
-              type="range"
-              min="0"
-              max="100"
-              step="0.1"
-              value={frequencyToSliderValue(lowPassFreq)}
-              className="col-span-2 w-full min-w-0"
-              onChange={e => {
-                const next = Math.min(MAX_EQ_FREQ, Math.max(sliderValueToFrequency(parseFloat(e.target.value)), highPassFreq + 10));
-                setLowPassFreq(next);
-                audioEngine.setStreamLowPass(id, next);
-                persist({ lowPassFreq: next });
-              }}
-            />
-          </label>
+
         </div>
       </div>
     </div>
@@ -323,6 +287,8 @@ function StreamControls({
 }
 
 export function Controls({
+  filters,
+  onFiltersChange,
   filterQ,
   onFilterQChange,
   activeSourceIds,
@@ -336,6 +302,7 @@ export function Controls({
   onRemoveSource,
   numbered = false,
 }: Props) {
+  const { highPassFreq, lowPassFreq } = filters;
   const [masterVolume, setMasterVolume] = useState(() => getMasterVolume());
   const [harmonicEvidenceSettings, setHarmonicEvidenceSettings] = useState(
     () => getHarmonicEvidenceSettings(),
@@ -427,6 +394,42 @@ export function Controls({
         </div>
       )}
       <div className="dev-mode dev-mode-cyan grid gap-3 pt-3">
+        <div className="grid items-start gap-x-6 gap-y-2 sm:grid-cols-[minmax(0,240px)_minmax(0,240px)] sm:justify-between">
+          <label className="dev-mode dev-mode-orange grid w-full max-w-[240px] grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-black" title="High-pass filter">
+            <span className="sc-label text-[11px] font-black uppercase">High Pass</span>
+            <span className="sc-value text-right font-mono text-[11px] font-black text-black">{formatFrequency(highPassFreq)}</span>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="0.1"
+              aria-label="High Pass"
+              value={frequencyToSliderValue(highPassFreq)}
+              className="col-span-2 w-full min-w-0"
+              onChange={e => {
+                const next = Math.max(MIN_EQ_FREQ, Math.min(sliderValueToFrequency(parseFloat(e.target.value)), lowPassFreq - 10));
+                onFiltersChange({ ...filters, highPassFreq: next });
+              }}
+            />
+          </label>
+          <label className="dev-mode dev-mode-yellow grid w-full max-w-[240px] grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-black" title="Low-pass filter">
+            <span className="sc-label text-[11px] font-black uppercase">Low Pass</span>
+            <span className="sc-value text-right font-mono text-[11px] font-black text-black">{formatFrequency(lowPassFreq)}</span>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="0.1"
+              aria-label="Low Pass"
+              value={frequencyToSliderValue(lowPassFreq)}
+              className="col-span-2 w-full min-w-0"
+              onChange={e => {
+                const next = Math.min(MAX_EQ_FREQ, Math.max(sliderValueToFrequency(parseFloat(e.target.value)), highPassFreq + 10));
+                onFiltersChange({ ...filters, lowPassFreq: next });
+              }}
+            />
+          </label>
+        </div>
         <div className="grid items-start gap-x-6 gap-y-2 sm:grid-cols-[minmax(0,240px)_minmax(0,240px)] sm:justify-between">
           <div className="dev-mode dev-mode-indigo grid w-full max-w-[240px] gap-2">
             <label
