@@ -18,13 +18,21 @@ const results=document.querySelector('#results');
 const rms=(data,start,end)=>Math.sqrt(data.slice(start,end).reduce((sum,x)=>sum+x*x,0)/(end-start));
 const peak=data=>data.reduce((max,x)=>Math.max(max,Math.abs(x)),0);
 const check=(condition,message)=>{if(!condition)throw Error(message)};
-async function render({enabled=true,channel='stereo',sampleRate=48000,signal,time=1,channels=2}){
+async function render({enabled=true,channel='stereo',sampleRate=48000,signal,time=1,channels=2,master=1,masterBeforeCompression=false,legacyBus=false}){
  const ctx=new OfflineAudioContext(channels,Math.round(sampleRate*time),sampleRate);
  const dynamics=createTravelerDynamics(ctx),router=createAudioOutputRouter(ctx);
  dynamics.setEnabled(enabled);router.setPeakCeiling(enabled?TRAVELER_PEAK_CEILING:null);router.setChannel(channel);
  const source=ctx.createBufferSource(),buffer=ctx.createBuffer(2,ctx.length,sampleRate);
  for(let c=0;c<2;c++)for(let i=0;i<ctx.length;i++)buffer.getChannelData(c)[i]=signal(i/sampleRate,c,i);
- source.buffer=buffer;source.connect(dynamics.input);dynamics.output.connect(router.input);source.start();
+ source.buffer=buffer;
+ const preMaster=ctx.createGain();preMaster.gain.value=masterBeforeCompression?master:1;
+ dynamics.masterGain.gain.value=masterBeforeCompression?1:master;
+ source.connect(preMaster);
+ if(legacyBus){
+  const bus=ctx.createDynamicsCompressor();bus.threshold.value=-20;bus.ratio.value=3;bus.attack.value=.01;bus.release.value=.15;
+  preMaster.connect(bus).connect(dynamics.input);
+ }else preMaster.connect(dynamics.input);
+ dynamics.output.connect(router.input);source.start();
  return {buffer:await ctx.startRendering(),sampleRate};
 }
 document.querySelector('#run').onclick=async()=>{
@@ -55,6 +63,34 @@ document.querySelector('#run').onclick=async()=>{
    for(let c=0;c<16;c++)if(!expected.includes(c))check(peak(data.buffer.getChannelData(c))===0,'leaked onto channel '+c);
    lines.push('PASS '+channel+': overload peak '+(20*Math.log10(max)).toFixed(2)+' dBFS; unassigned channels silent');
   }
+  for(const amplitude of [.001,.01,.1,.5]){
+   const levels=[];
+   for(const masterBeforeCompression of [true,false]){
+    const pair=[];
+    for(const master of [4,8]){
+     const data=await render({legacyBus:true,masterBeforeCompression,master,signal:t=>amplitude*Math.sin(2*Math.PI*440*t)});
+     pair.push(rms(data.buffer.getChannelData(0),24000,43200));
+     check(peak(data.buffer.getChannelData(0))<=TRAVELER_PEAK_CEILING+1e-6,'master gain bypassed ceiling');
+    }
+    levels.push(20*Math.log10(pair[1]/pair[0]));
+   }
+   if(amplitude<=.01)check(levels[1]>5.8&&levels[1]<6.2,'master no longer doubles quiet signals: '+levels[1]);
+   lines.push('Master 400→800%, input '+amplitude+': old order +'+levels[0].toFixed(2)+' dB; new order +'+levels[1].toFixed(2)+' dB');
+  }
+  const masterOverload=await render({master:8,legacyBus:true,signal:(t,c,i)=>i%500===0?32:8*Math.sin(2*Math.PI*220*t)});
+  check(peak(masterOverload.buffer.getChannelData(0))<=TRAVELER_PEAK_CEILING+1e-6,'800% master exceeded ceiling');
+  lines.push('PASS 800% master: overload remains below -1 dBFS');
+  for(const enabled of [false,true]){
+   const muted=await render({enabled,master:0,legacyBus:true,signal:t=>.5*Math.sin(2*Math.PI*440*t)});
+   check(peak(muted.buffer.getChannelData(0))===0,'master mute leaks in mode '+enabled);
+  }
+  const normalLevels=[];
+  for(const master of [4,8]){
+   const data=await render({enabled:false,master,legacyBus:true,signal:t=>.1*Math.sin(2*Math.PI*440*t)});
+   normalLevels.push(rms(data.buffer.getChannelData(0),24000,43200));
+  }
+  check(Math.abs(normalLevels[1]/normalLevels[0]-2)<.01,'normal mode master is not an output fader');
+  lines.push('PASS Master: silence at 0% in both modes; normal-mode output doubles from 400% to 800%');
   const bypass=await render({enabled:false,signal:t=>2*Math.sin(2*Math.PI*440*t)});
   check(peak(bypass.buffer.getChannelData(0))>1.99,'normal mode was limited');
   lines.push('PASS normal mode: extra dynamics and ceiling bypassed');

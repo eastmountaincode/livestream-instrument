@@ -205,9 +205,6 @@ export class AudioEngine {
     this.ctx = new AudioContext();
     this.globalFilters = normalizeGlobalFilters(null, this.ctx.sampleRate / 2 - 1);
 
-    this.masterGain = this.ctx.createGain();
-    this.masterGain.gain.value = 1;
-
     this.compressor = this.ctx.createDynamicsCompressor();
     this.compressor.threshold.value = -20;
     this.compressor.ratio.value = 3;
@@ -218,8 +215,8 @@ export class AudioEngine {
     this.analyser.fftSize = 2048;
     this.outputRouter = createAudioOutputRouter(this.ctx);
 
-    this.masterGain.connect(this.compressor);
     this.travelerDynamics = createTravelerDynamics(this.ctx);
+    this.masterGain = this.travelerDynamics.masterGain;
     this.compressor.connect(this.travelerDynamics.input);
     this.travelerDynamics.output.connect(this.analyser);
     this.analyser.connect(this.outputRouter.input);
@@ -324,7 +321,7 @@ export class AudioEngine {
     lowPassFilter.connect(limiter);
     limiter.connect(analyser);
     analyser.connect(panner);
-    panner.connect(this.masterGain);
+    panner.connect(this.compressor);
 
     // Build voice pool for this stream
     const voices: Voice[] = [];
