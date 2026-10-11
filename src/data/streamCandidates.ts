@@ -534,8 +534,8 @@ export const STREAM_CANDIDATE_SEEDS: StreamCandidate[] = ([
     pageUrl: 'https://locusonus.org/soundmap/server/',
     format: 'MP3 Icecast',
     source: 'Locus Sonus / CreaCast',
-    status: 'accepted',
-    notes: 'Netherlands city-edge microphone from the active server list. Verified playable through the app proxy.',
+    status: 'rejected',
+    notes: 'Removed from live sources on 2026-10-11: reported offline and no longer connecting.',
   },
   {
     id: 'locus-zwolle-nature-reserve-langenholte',
