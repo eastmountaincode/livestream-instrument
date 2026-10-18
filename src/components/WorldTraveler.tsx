@@ -24,6 +24,10 @@ export function WorldTraveler({ selectedId, slots, sources, statuses, onSelect, 
         return (
           <button key={slot.id} type="button"
             className={`flex h-14 min-w-0 flex-col items-center justify-center gap-1 border border-ink px-1 font-mono text-[10px] font-semibold ${selected ? 'bg-ink text-paper' : failed ? 'bg-warning text-copy' : 'bg-paper text-copy hover:bg-surface'}`}
+            data-stream-phase={phase ?? 'idle'}
+            data-stream-attempt={statuses[slot.id]?.attempt ?? 0}
+            data-stream-time={statuses[slot.id]?.mediaTime}
+            data-stream-buffer={statuses[slot.id]?.bufferedSeconds}
             aria-pressed={selected}
             aria-label={`Key ${slot.keyLabel}: ${slot.label}${failed ? ' — unavailable' : loading ? ' — loading' : ''}`}
             onClick={() => {

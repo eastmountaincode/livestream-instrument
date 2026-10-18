@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import { audioEngine } from '../services/AudioEngine';
+import { openBufferedStream, supportsBufferedStream } from '../services/bufferedStream';
 import { getOrcasoundStreamUrl, type LiveSource } from '../services/streams';
 import { MAX_STREAM_VOLUME, getStreamSettings, saveStreamSettings, type StreamSettings } from '../services/storage';
 
@@ -24,6 +25,8 @@ export interface StreamPlaybackStatus {
   nextRetryAt?: number;
   readyState?: number;
   networkState?: number;
+  mediaTime?: number;
+  bufferedSeconds?: number;
   usingProxyFallback?: boolean;
 }
 
@@ -37,6 +40,7 @@ interface ActiveStream {
   source: LiveSource;
   audio: HTMLAudioElement;
   hls?: Hls;
+  stopBufferedStream?: () => void;
   cleanup?: () => void;
   reconnectTimerId?: number;
   watchdogId?: number;
@@ -62,6 +66,8 @@ export interface StreamConnectOptions {
   useProxyFallback?: boolean;
 }
 
+// Environmental streams trade a few seconds of live latency for continuous audio.
+const STREAM_BUFFER_SECONDS = 12;
 const STREAM_WATCHDOG_INTERVAL_MS = 5_000;
 const STREAM_STALL_TIMEOUT_MS = 35_000;
 const STREAM_RECONNECT_DELAY_MS = 1_500;
@@ -75,10 +81,21 @@ function shouldUseProxyFirst(source: LiveSource): boolean {
   return window.location.protocol === 'https:' && source.url.startsWith('http:');
 }
 
+function bufferedAhead(audio: HTMLAudioElement): number {
+  for (let i = 0; i < audio.buffered.length; i++) {
+    if (audio.buffered.start(i) <= audio.currentTime + 0.05 && audio.buffered.end(i) >= audio.currentTime) {
+      return Math.max(0, audio.buffered.end(i) - audio.currentTime);
+    }
+  }
+  return 0;
+}
+
 function readMediaState(audio: HTMLAudioElement) {
   return {
     readyState: audio.readyState,
     networkState: audio.networkState,
+    mediaTime: Math.round(audio.currentTime * 1000) / 1000,
+    bufferedSeconds: Math.round(bufferedAhead(audio) * 1000) / 1000,
   };
 }
 
@@ -148,6 +165,7 @@ export function useStreamPlayback({
     if (stream.watchdogId) window.clearInterval(stream.watchdogId);
     stream.cleanup?.();
     stream.hls?.destroy();
+    stream.stopBufferedStream?.();
     stream.audio.pause();
     stream.audio.removeAttribute('src');
     stream.audio.load();
@@ -195,8 +213,14 @@ export function useStreamPlayback({
 
     void audioEngine.resume().catch(() => undefined);
 
+    const bufferedPlayback = supportsBufferedStream(source);
+    let fillingBuffer = bufferedPlayback;
+    let transportFailure: string | null = null;
+    let lastBufferedEnd = 0;
+    let lastDataAt = Date.now();
     const audio = new Audio();
-    audio.autoplay = true;
+    // Playback is explicit so autoplay cannot bypass the continuity buffer.
+    audio.autoplay = false;
     audio.crossOrigin = 'anonymous';
     audio.preload = 'auto';
     audio.setAttribute('playsinline', 'true');
@@ -326,10 +350,23 @@ export function useStreamPlayback({
     };
 
     const startPlayback = () => {
+      if (!isCurrentStream()) return;
+      if (fillingBuffer) {
+        const ahead = bufferedAhead(audio);
+        const fullyBuffered = Number.isFinite(audio.duration) && ahead > 0
+          && audio.currentTime + ahead >= audio.duration - 0.05;
+        if (ahead < STREAM_BUFFER_SECONDS && !fullyBuffered && !(transportFailure && ahead > 0)) {
+          updateStatusWithMedia('buffering', 'Building audio buffer');
+          return;
+        }
+        fillingBuffer = false;
+        stream.lastProgressAt = Date.now();
+      }
       updateStatusWithMedia('buffering', 'Buffering audio');
       void audio.play().then(markProgress).catch((error) => {
         if (!isCurrentStream()) return;
         const errorName = error && typeof error === 'object' && 'name' in error ? String(error.name) : '';
+        if (errorName === 'AbortError' && fillingBuffer) return;
         if (errorName === 'NotAllowedError') {
           setActiveIds(prev => {
             const next = new Set(prev);
@@ -342,6 +379,34 @@ export function useStreamPlayback({
 
         scheduleReconnect('Playback did not start');
       });
+    };
+
+    const observeBuffer = () => {
+      if (!isCurrentStream() || !bufferedPlayback) return;
+      const end = audio.buffered.length ? audio.buffered.end(audio.buffered.length - 1) : 0;
+      if (end > lastBufferedEnd + 0.01) {
+        lastBufferedEnd = end;
+        lastDataAt = Date.now();
+        // Incoming data can save a stalled connection before replacement fires.
+        if (fillingBuffer && stream.reconnectTimerId && !audio.error && !audio.ended) {
+          window.clearTimeout(stream.reconnectTimerId);
+          stream.reconnectTimerId = undefined;
+        }
+      }
+    };
+    const checkBuffer = () => {
+      if (!fillingBuffer) return false;
+      observeBuffer();
+      if (Date.now() - lastDataAt >= STREAM_STALL_TIMEOUT_MS) {
+        scheduleReconnect('No incoming audio while buffering');
+      } else {
+        startPlayback();
+      }
+      return true;
+    };
+    const onBufferProgress = () => {
+      observeBuffer();
+      if (fillingBuffer) startPlayback();
     };
 
     const applyCurrentSettings = () => {
@@ -417,18 +482,35 @@ export function useStreamPlayback({
         scheduleReconnect('Stream stopped');
       };
       const onMediaPause = () => {
-        if (!isCurrentStream() || !stream.ready) return;
+        if (!isCurrentStream() || !stream.ready || fillingBuffer) return;
         startPlayback();
       };
       const onWaiting = () => {
         if (!isCurrentStream()) return;
+        if (transportFailure && bufferedAhead(audio) < 0.1) {
+          scheduleReconnect(transportFailure);
+          return;
+        }
+        // A network 'stalled' event does not mean buffered playback has stopped.
+        if (audio.readyState >= 3) return;
+        if (bufferedPlayback && !audio.error && !audio.ended && bufferedAhead(audio) < 0.1) {
+          if (!fillingBuffer) {
+            fillingBuffer = true;
+            lastDataAt = Date.now();
+            audio.pause();
+          }
+          updateStatusWithMedia('buffering', 'Refilling audio buffer');
+          return;
+        }
         updateStatusWithMedia('stalled', 'Waiting for media');
       };
       const onLoadedData = () => {
-        updateStatusWithMedia('buffering', 'Audio data loaded');
+        if (bufferedPlayback) onBufferProgress();
+        else updateStatusWithMedia('buffering', 'Audio data loaded');
       };
       const onCanPlay = () => {
-        updateStatusWithMedia('buffering', 'Audio can play');
+        if (bufferedPlayback) onBufferProgress();
+        else updateStatusWithMedia('buffering', 'Audio can play');
       };
       const onRecoverySignal = () => {
         if (!isCurrentStream()) return;
@@ -437,6 +519,7 @@ export function useStreamPlayback({
           scheduleReconnect('Stream ended', 0);
           return;
         }
+        if (checkBuffer()) return;
         if (audio.paused) {
           startPlayback();
           return;
@@ -454,6 +537,7 @@ export function useStreamPlayback({
         }
       };
 
+      audio.addEventListener('progress', onBufferProgress);
       audio.addEventListener('playing', markProgress);
       audio.addEventListener('timeupdate', markProgress);
       audio.addEventListener('loadeddata', onLoadedData);
@@ -471,6 +555,7 @@ export function useStreamPlayback({
       window.addEventListener('pageshow', onRecoverySignal);
 
       stream.cleanup = () => {
+        audio.removeEventListener('progress', onBufferProgress);
         audio.removeEventListener('playing', markProgress);
         audio.removeEventListener('timeupdate', markProgress);
         audio.removeEventListener('loadeddata', onLoadedData);
@@ -492,6 +577,12 @@ export function useStreamPlayback({
         if (!isCurrentStream() || !stream.ready) return;
 
         void audioEngine.resume().catch(() => undefined);
+
+        if (transportFailure && bufferedAhead(audio) < 0.1) {
+          scheduleReconnect(transportFailure);
+          return;
+        }
+        if (checkBuffer()) return;
 
         const liveSyncPosition = stream.hls?.liveSyncPosition;
         if (
@@ -601,10 +692,23 @@ export function useStreamPlayback({
         stream.usingProxyFallback = options.useProxyFallback || shouldUseProxyFirst(source);
         const streamUrl = stream.usingProxyFallback && source.proxyUrl ? source.proxyUrl : source.url;
         updateStatusWithMedia('opening', stream.usingProxyFallback ? 'Opening proxied audio stream' : 'Opening audio stream');
-        audio.src = streamUrl;
         audio.addEventListener('canplay', onReady, { once: true });
         if (!attachAudioChannel()) return;
-        audio.load();
+        if (bufferedPlayback) {
+          stream.stopBufferedStream = openBufferedStream(audio, streamUrl, onBufferProgress, error => {
+            if (!isCurrentStream()) return;
+            // Drain received audio before replacing a failed download.
+            transportFailure = error.message;
+            if (bufferedAhead(audio) > 0.1) {
+              if (fillingBuffer) startPlayback();
+            } else if (!tryProxyFallback()) {
+              scheduleReconnect(error.message);
+            }
+          });
+        } else {
+          audio.src = streamUrl;
+          audio.load();
+        }
         startPlayback();
       } else {
         failStream('Source does not have a playable stream URL');
