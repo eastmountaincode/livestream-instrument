@@ -1,0 +1,1 @@
+{"name":"cicada-stream-relay","private":true,"type":"module","scripts":{"build":"node build.mjs","deploy":"npm run build && cf deploy --prebuilt"},"devDependencies":{"cf":"1.0.0-beta.17"}}

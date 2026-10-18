@@ -33,7 +33,7 @@ export interface LiveSourcesResult {
  */
 export async function getOrcasoundStreamUrl(source: LiveSource): Promise<string> {
   if (source.latestTxtUrl) {
-    const resp = await fetch(`/api/stream-preview?url=${encodeURIComponent(source.latestTxtUrl)}`, { cache: 'no-store' });
+    const resp = await fetch(`/api/stream-preview?url=${encodeURIComponent(source.latestTxtUrl)}`, { cache: 'no-store', signal: AbortSignal.timeout(15_000) });
     if (!resp.ok) throw new Error(`Failed to fetch latest.txt: ${resp.status}`);
     const timestamp = (await resp.text()).trim();
     const baseUrl = source.latestTxtUrl.replace(/\/latest\.txt(?:\?.*)?$/, '');
@@ -44,7 +44,7 @@ export async function getOrcasoundStreamUrl(source: LiveSource): Promise<string>
     throw new Error('Not an Orcasound source');
   }
   const latestUrl = `https://s3-us-west-2.amazonaws.com/${source.hlsBucket}/${source.hlsNode}/latest.txt`;
-  const resp = await fetch(latestUrl);
+  const resp = await fetch(latestUrl, { signal: AbortSignal.timeout(15_000) });
   if (!resp.ok) throw new Error(`Failed to fetch latest.txt: ${resp.status}`);
   const timestamp = (await resp.text()).trim();
   return `https://s3-us-west-2.amazonaws.com/${source.hlsBucket}/${source.hlsNode}/hls/${timestamp}/live.m3u8`;

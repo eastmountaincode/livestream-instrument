@@ -43,6 +43,7 @@ interface ActiveStream {
   ready: boolean;
   lastProgressAt: number;
   lastCurrentTime: number;
+  healthySince: number | null;
   reconnectAttempt: number;
   hadSuccessfulPlayback: boolean;
   usingProxyFallback: boolean;
@@ -206,6 +207,7 @@ export function useStreamPlayback({
       ready: false,
       lastProgressAt: Date.now(),
       lastCurrentTime: 0,
+      healthySince: null,
       reconnectAttempt: attempt,
       hadSuccessfulPlayback: options.hadSuccessfulPlayback ?? false,
       usingProxyFallback: options.useProxyFallback ?? false,
@@ -233,8 +235,18 @@ export function useStreamPlayback({
 
     const markProgress = () => {
       if (!isCurrentStream()) return;
-      stream.lastProgressAt = Date.now();
+      // Events and a resolved play() promise do not prove samples advanced.
+      if (audio.paused || audio.ended || audio.error || Math.abs(audio.currentTime - stream.lastCurrentTime) < 0.001) return;
+      const now = Date.now();
+      if (now - stream.lastProgressAt > STREAM_STALL_TIMEOUT_MS) stream.healthySince = null;
+      stream.healthySince ??= now;
+      stream.lastProgressAt = now;
       stream.lastCurrentTime = audio.currentTime;
+      if (stream.reconnectTimerId) {
+        window.clearTimeout(stream.reconnectTimerId);
+        stream.reconnectTimerId = undefined;
+      }
+      if (now - stream.healthySince >= 10_000) stream.reconnectAttempt = 0;
       stream.hadSuccessfulPlayback = true;
       if (!stream.ready) {
         updateStatusWithMedia('buffering', 'Starting audio');
@@ -275,6 +287,7 @@ export function useStreamPlayback({
     const scheduleReconnect = (reason: string, delayMs = STREAM_RECONNECT_DELAY_MS) => {
       if (!isCurrentStream() || stream.reconnectTimerId) return;
 
+      stream.healthySince = null;
       const nextAttempt = stream.reconnectAttempt + 1;
       if (!stream.hadSuccessfulPlayback && nextAttempt > STREAM_MAX_START_ATTEMPTS) {
         failStream(`${reason}; source did not start after ${STREAM_MAX_START_ATTEMPTS} tries`);
@@ -315,6 +328,7 @@ export function useStreamPlayback({
     const startPlayback = () => {
       updateStatusWithMedia('buffering', 'Buffering audio');
       void audio.play().then(markProgress).catch((error) => {
+        if (!isCurrentStream()) return;
         const errorName = error && typeof error === 'object' && 'name' in error ? String(error.name) : '';
         if (errorName === 'NotAllowedError') {
           setActiveIds(prev => {
@@ -387,7 +401,7 @@ export function useStreamPlayback({
 
     try {
       const tryProxyFallback = () => {
-        if (!source.proxyUrl || stream.usingProxyFallback || stream.ready) return false;
+        if (!isCurrentStream() || !source.proxyUrl || stream.usingProxyFallback) return false;
 
         void connect(source, {
           reconnect: true,
@@ -419,8 +433,11 @@ export function useStreamPlayback({
       const onRecoverySignal = () => {
         if (!isCurrentStream()) return;
         void audioEngine.resume().catch(() => undefined);
-        stream.hls?.startLoad();
-        if (audio.paused || audio.ended) {
+        if (audio.ended || audio.error) {
+          scheduleReconnect('Stream ended', 0);
+          return;
+        }
+        if (audio.paused) {
           startPlayback();
           return;
         }
@@ -508,7 +525,8 @@ export function useStreamPlayback({
 
       if (source.hlsUrl || source.latestTxtUrl || source.hlsNode) {
         updateStatusWithMedia('resolving', source.latestTxtUrl || source.hlsNode ? 'Resolving latest HLS segment' : 'Opening HLS source');
-        const hlsUrl = source.hlsUrl || await getOrcasoundStreamUrl(source);
+        let hlsUrl = source.hlsUrl || await getOrcasoundStreamUrl(source);
+        if (!isCurrentStream()) return;
         updateStatusWithMedia('opening', 'Opening HLS stream');
 
         if (Hls.isSupported()) {
@@ -536,6 +554,7 @@ export function useStreamPlayback({
           let recoveryCount = 0;
           hls.on(Hls.Events.ERROR, async (_event, data) => {
             if (!isCurrentStream()) return;
+            if (stream.healthySince !== null && Date.now() - stream.healthySince >= 10_000) recoveryCount = 0;
             if (!data.fatal) {
               if (String(data.details).toLowerCase().includes('stalled')) {
                 updateStatusWithMedia('stalled', 'HLS fragment stalled');
@@ -545,19 +564,24 @@ export function useStreamPlayback({
 
             if (data.type === Hls.ErrorTypes.NETWORK_ERROR && recoveryCount < MAX_HLS_RECOVERIES_BEFORE_RECONNECT) {
               recoveryCount++;
+              stream.healthySince = null;
               updateStatusWithMedia('buffering', `Recovering HLS network error (${recoveryCount})`);
               try {
-                const freshUrl = await getOrcasoundStreamUrl(source);
+                const freshUrl = source.hlsUrl || await getOrcasoundStreamUrl(source);
+                if (!isCurrentStream()) return;
                 if (freshUrl !== hlsUrl) {
+                  hlsUrl = freshUrl;
                   hls.loadSource(freshUrl);
                 } else {
                   hls.startLoad();
                 }
               } catch {
+                if (!isCurrentStream()) return;
                 hls.startLoad();
               }
             } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR && recoveryCount < MAX_HLS_RECOVERIES_BEFORE_RECONNECT) {
               recoveryCount++;
+              stream.healthySince = null;
               updateStatusWithMedia('buffering', `Recovering HLS media error (${recoveryCount})`);
               hls.recoverMediaError();
             } else {
@@ -586,7 +610,7 @@ export function useStreamPlayback({
         failStream('Source does not have a playable stream URL');
       }
     } catch (error) {
-      failStream(error instanceof Error ? error.message : 'Could not open stream');
+      scheduleReconnect(error instanceof Error ? error.message : 'Could not open stream');
     }
   }, [cleanupActiveStream, setStatus]);
 
