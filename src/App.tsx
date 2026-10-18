@@ -266,7 +266,7 @@ function App() {
                 </label>
                 {traveler.enabled ? <WorldTraveler
                   selectedId={traveler.selectedId} slots={traveler.slots} sources={availableSources} statuses={statuses}
-                  onSelect={traveler.select} onConnect={connect}
+                  onSelect={traveler.select} onConnect={connect} octave={traveler.octave} onOctaveChange={traveler.changeOctave}
                 /> : <StreamSelector
                 sources={availableSources}
                 sourceLoadError={sourceLoadError}

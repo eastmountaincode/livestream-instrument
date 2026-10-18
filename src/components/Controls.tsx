@@ -162,7 +162,7 @@ function StreamControls({
           )}
         </div>
         <div className="dev-mode dev-mode-pink ml-auto flex shrink-0 items-center gap-1 text-[11px] font-black uppercase text-black">
-          <div className="dev-mode dev-mode-blue flex items-center gap-1">
+          {!number && <><div className="dev-mode dev-mode-blue flex items-center gap-1">
             <button
               className="icon-button flex h-7 w-7 items-center justify-center border-2 border-black p-0"
               onClick={() => {
@@ -222,7 +222,7 @@ function StreamControls({
             aria-pressed={muted}
           >
             M
-          </button>
+          </button></>}
           {onRemoveSource && <button
             type="button"
             className="icon-button flex h-7 w-7 shrink-0 items-center justify-center border-2 border-black p-0"

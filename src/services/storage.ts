@@ -63,6 +63,7 @@ interface SavedState {
   activeStreamIds: string[];
   streams: Record<string, StreamSettings>;
   travelerVolumes: Record<string, number>;
+  travelerOctave: number;
   soloId: string | null;
   masterVolume: number;
   globalFilterQ: number;
@@ -129,6 +130,7 @@ function normalizeSavedState(state: StoredStateInput | null): SavedState {
   return {
     activeStreamIds: Array.isArray(state?.activeStreamIds) ? state.activeStreamIds : [],
     streams,
+    travelerOctave: normalizeTravelerOctave(state?.travelerOctave),
     travelerVolumes: Object.fromEntries(
       Object.entries(state?.travelerVolumes ?? {})
         .filter(([, volume]) => typeof volume === 'number' && Number.isFinite(volume))
@@ -453,5 +455,19 @@ export function getShowTravelerPlace(): boolean {
 export function saveShowTravelerPlace(show: boolean): void {
   const state = getCurrent();
   state.showTravelerPlace = show;
+  save(state);
+}
+
+export function normalizeTravelerOctave(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(-3, Math.min(3, Math.round(value))) : 0;
+}
+
+export function getTravelerOctave(): number {
+  return getCurrent().travelerOctave;
+}
+
+export function saveTravelerOctave(value: number): void {
+  const state = getCurrent();
+  state.travelerOctave = normalizeTravelerOctave(value);
   save(state);
 }

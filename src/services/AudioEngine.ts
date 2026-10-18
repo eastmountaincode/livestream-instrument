@@ -185,6 +185,7 @@ export class AudioEngine {
   private externalClock = false;
   private chordPadTight = false;
   private pitchBendSemitones = 0;
+  private travelerOctave = 0;
   private toneMode: ToneMode = 'harmonic-evidence';
   private harmonicEvidenceAmount = 1;
   private harmonicEvidenceColor = 0;
@@ -975,7 +976,7 @@ export class AudioEngine {
     for (const [, ch] of this.channels) {
       ch.levelMatchPending = ch.levelMatch;
       for (const [note, voice] of ch.activeVoices) {
-        voice.targetFrequency = noteToFreq(note + ch.octaveShift * 12 + this.pitchBendSemitones);
+        voice.targetFrequency = noteToFreq(note + (this.travelerSourceId === null ? ch.octaveShift : this.travelerOctave) * 12 + this.pitchBendSemitones);
         const harmonicEvidenceEnabled = this.toneMode === 'harmonic-evidence';
         this.configureHarmonicBands(voice, harmonicEvidenceEnabled, null, timeConstant);
 
@@ -1021,7 +1022,7 @@ export class AudioEngine {
       }
     }
 
-    const targetFrequency = noteToFreq(note + ch.octaveShift * 12 + this.pitchBendSemitones);
+    const targetFrequency = noteToFreq(note + (this.travelerSourceId === null ? ch.octaveShift : this.travelerOctave) * 12 + this.pitchBendSemitones);
     const now = this.ctx.currentTime;
 
     voice.note = note;
@@ -1625,6 +1626,7 @@ export class AudioEngine {
     if (this.sourceLevelingEnabled && !wasTraveling && id != null) this.captureTravelerReference();
     this.travelerSourceId = id;
     if (wasTraveling !== (id != null)) {
+      this.retuneActiveVoices(0.005);
       this.setSourceLeveling(id != null);
       this.travelerDynamics.setEnabled(id != null);
       this.outputRouter.setPeakCeiling(id != null ? TRAVELER_PEAK_CEILING : null);
@@ -1719,6 +1721,15 @@ export class AudioEngine {
 
   getStreamAnalyser(id: string): AnalyserNode | null {
     return this.channels.get(id)?.analyser ?? null;
+  }
+
+  setTravelerOctave(shift: number) {
+    this.travelerOctave = Number.isFinite(shift) ? Math.max(-3, Math.min(3, Math.round(shift))) : 0;
+    if (this.travelerSourceId !== null) this.retuneActiveVoices(0.005);
+  }
+
+  getTravelerOctave(): number {
+    return this.travelerOctave;
   }
 
   setStreamOctave(id: string, shift: number) {

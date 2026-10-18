@@ -177,6 +177,38 @@ control.toggle();
 assert.equal(storage.getStreamSettings(slots[1].id).volume, 0, 'zero volume survives mode reentry');
 control.toggle();
 assert.equal(connections.length, 30); assert.equal(disconnected.length, 28, 'repeated mode transitions are safe');
+// A shared octave retunes held chords, new notes, and reconnecting sources,
+// without modifying the normal mix or the destination key assignments.
+engine.setToneMode('bands');
+engine.setStreamOctave(slots[0].id, -1);
+control.toggle();
+control.select(slots[0].id);
+const frequency = (id, note) => engine.channels.get(id).activeVoices.get(note).targetFrequency;
+const middleC = 440 * 2 ** ((60 - 69) / 12);
+control.changeOctave(1);
+assert.equal(frequency(slots[0].id, 60), middleC * 2, 'held chord moves to the shared octave');
+assert.equal(engine.getStreamOctave(slots[0].id), -1, 'normal per-track octave remains unchanged');
+assert.equal(storage.getTravelerOctave(), 1, 'shared octave is saved');
+control.select(slots[1].id);
+assert.equal(frequency(slots[1].id, 60), middleC * 2, 'changing destination keeps the octave');
+engine.channels.delete(slots[1].id);
+engine.addStream(slots[1].id, {});
+assert.equal(frequency(slots[1].id, 60), middleC * 2, 'reconnecting destination inherits the octave');
+engine.noteOn(67, 100, 'chord-pad');
+assert.equal(frequency(slots[1].id, 67), 440 * 2 ** ((79 - 69) / 12), 'new notes use the shared octave');
+engine.noteOff(67, 'chord-pad');
+control.changeOctave(-2);
+assert.equal(frequency(slots[1].id, 60), middleC / 4, 'downward shifts retune existing voices');
+control.toggle();
+assert.equal(frequency(slots[0].id, 60), middleC / 2, 'leaving Traveler restores the normal octave');
+control.toggle();
+assert.equal(engine.getTravelerOctave(), -2, 'mode reentry retains the selected octave');
+control.changeOctave(50);
+assert.equal(engine.getTravelerOctave(), 3, 'octave range is bounded');
+control.changeOctave(Number.NaN);
+assert.equal(engine.getTravelerOctave(), 0, 'invalid values cannot poison audio frequencies');
+control.toggle();
+
 // Spectrum work scales with the audible destination, not the connected count.
 engine.disconnectAllStreams();
 engine.setTravelerSource(slots[0].id);

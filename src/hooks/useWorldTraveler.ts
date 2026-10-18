@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { audioEngine } from '../services/AudioEngine';
 import { midiService } from '../services/MidiService';
-import { beginTemporaryStreamSettings, endTemporaryStreamSettings, getStreamSettings, type StreamSettings } from '../services/storage';
+import { beginTemporaryStreamSettings, endTemporaryStreamSettings, getStreamSettings, getTravelerOctave, saveTravelerOctave, normalizeTravelerOctave, type StreamSettings } from '../services/storage';
 import type { LiveSource } from '../services/streams';
 import type { StreamConnectOptions } from './useStreamPlayback';
 import { getTravelerSources, type TravelerSource } from '../music/worldTraveler';
@@ -37,6 +37,15 @@ export function useWorldTraveler({ sources, wantedIds, activeIds, connect, disco
   const [enabled, setEnabled] = useState(false);
   const slots = useMemo(() => getTravelerSources(sources), [sources]);
   const [selectedId, setSelectedId] = useState<string>(slots[0]?.id ?? "");
+  const [octave, setOctave] = useState(getTravelerOctave);
+  const octaveRef = useRef(octave);
+  const changeOctave = useCallback((value: number) => {
+    const next = normalizeTravelerOctave(value);
+    octaveRef.current = next;
+    setOctave(next);
+    audioEngine.setTravelerOctave(next);
+    saveTravelerOctave(next);
+  }, []);
   const session = useRef<{ wanted: Set<string>; settings: Map<string, StreamSettings>; slots: TravelerSource[] } | null>(null);
 
   const select = useCallback((id: string) => {
@@ -74,6 +83,7 @@ export function useWorldTraveler({ sources, wantedIds, activeIds, connect, disco
       const volume = getStreamSettings(slot.id)?.volume;
       if (volume !== undefined) audioEngine.setStreamVolume(slot.id, volume);
     }
+    audioEngine.setTravelerOctave(octaveRef.current);
     audioEngine.setTravelerSource(firstId);
     setSelectedId(firstId);
     setEnabled(true);
@@ -97,5 +107,5 @@ export function useWorldTraveler({ sources, wantedIds, activeIds, connect, disco
     session.current = null;
   }, []);
 
-  return { enabled, selectedId, slots, select, toggle };
+  return { enabled, selectedId, slots, select, toggle, octave, changeOctave };
 }
