@@ -54,6 +54,7 @@ function App() {
   const { filters, updateFilters } = useGlobalFilters();
   const [savedStateOnLoad] = useState(() => getSavedState());
   const restoredStreamsRef = useRef(false);
+  const defaultTravelerStartedRef = useRef(false);
   const [started, setStarted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [devModeEnabled, setDevModeEnabled] = useState(false);
@@ -137,6 +138,14 @@ function App() {
           const result = await fetchAcceptedLiveSources();
 
           if (cancelled) return;
+          // Restore the normal mix before Traveler takes its session snapshot.
+          if (!restoredStreamsRef.current) {
+            restoredStreamsRef.current = true;
+            for (const id of savedStateOnLoad?.activeStreamIds ?? []) {
+              const source = result.sources.find(candidate => candidate.id === id);
+              if (source) void connect(source);
+            }
+          }
           setAvailableSources(result.sources);
           setSourceLoadError('');
           setSourcesReady(true);
@@ -159,21 +168,15 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [started]);
+  }, [connect, savedStateOnLoad, started]);
 
+  const toggleTraveler = traveler.toggle;
+  const travelerSourceCount = traveler.slots.length;
   useEffect(() => {
-    if (!started || restoredStreamsRef.current || !sourcesReady) return;
-    restoredStreamsRef.current = true;
-
-    const idsToConnect = savedStateOnLoad?.activeStreamIds ?? [];
-
-    for (const id of idsToConnect) {
-      const source = availableSources.find(s => s.id === id);
-      if (source) {
-        void connect(source);
-      }
-    }
-  }, [availableSources, connect, savedStateOnLoad, sourcesReady, started]);
+    if (!sourcesReady || defaultTravelerStartedRef.current || travelerSourceCount === 0) return;
+    defaultTravelerStartedRef.current = true;
+    toggleTraveler();
+  }, [sourcesReady, travelerSourceCount, toggleTraveler]);
 
   useEffect(() => {
     if (restoredStreamsRef.current && !traveler.enabled) {
