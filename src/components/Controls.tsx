@@ -34,6 +34,7 @@ interface Props {
   onChordPadVolumeChange: (volume: number) => void;
   onRemoveSource?: (sourceId: string) => void;
   numbered?: boolean;
+  travelerOctave?: { value: number; onChange: (value: number) => void };
 }
 
 const MAX_MIDI_STREAM_VOLUME = MAX_STREAM_VOLUME;
@@ -301,6 +302,7 @@ export function Controls({
   onChordPadVolumeChange,
   onRemoveSource,
   numbered = false,
+  travelerOctave,
 }: Props) {
   const { highPassFreq, lowPassFreq } = filters;
   const [masterVolume, setMasterVolume] = useState(() => getMasterVolume());
@@ -432,6 +434,34 @@ export function Controls({
         </div>
         <div className="grid items-start gap-x-6 gap-y-2 sm:grid-cols-[minmax(0,240px)_minmax(0,240px)] sm:justify-between">
           <div className="dev-mode dev-mode-indigo grid w-full max-w-[240px] gap-2">
+            {travelerOctave && (
+              <div className="dev-mode dev-mode-blue flex items-center justify-between gap-2 text-[11px] font-black uppercase text-black" role="group" aria-label="World Traveler octave">
+                <span>Octave</span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    className="icon-button flex h-7 w-7 items-center justify-center border-2 border-black p-0"
+                    aria-label="Lower World Traveler octave"
+                    disabled={travelerOctave.value <= -3}
+                    onClick={() => travelerOctave.onChange(travelerOctave.value - 1)}
+                  >
+                    <Minus aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={2.5} />
+                  </button>
+                  <output className="min-w-[42px] text-center" aria-live="polite">
+                    {travelerOctave.value >= 0 ? `+${travelerOctave.value}` : travelerOctave.value}
+                  </output>
+                  <button
+                    type="button"
+                    className="icon-button flex h-7 w-7 items-center justify-center border-2 border-black p-0"
+                    aria-label="Raise World Traveler octave"
+                    disabled={travelerOctave.value >= 3}
+                    onClick={() => travelerOctave.onChange(travelerOctave.value + 1)}
+                  >
+                    <Plus aria-hidden="true" className="h-3.5 w-3.5" strokeWidth={2.5} />
+                  </button>
+                </div>
+              </div>
+            )}
             <label
                 className="dev-mode dev-mode-violet grid w-full grid-cols-[1fr_auto] items-center gap-x-2 gap-y-1 text-black"
                 title="Global resonance for every track. Mod wheel: broad at 0, sharp at 1."

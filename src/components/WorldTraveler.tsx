@@ -4,8 +4,6 @@ import type { LiveSource } from '../services/streams';
 import { LoadingSpinner } from './LoadingSpinner';
 
 interface Props {
-  octave: number;
-  onOctaveChange: (value: number) => void;
   selectedId: string;
   slots: TravelerSource[];
   sources: LiveSource[];
@@ -14,18 +12,9 @@ interface Props {
   onConnect: (source: LiveSource, options?: StreamConnectOptions) => Promise<void>;
 }
 
-export function WorldTraveler({ selectedId, slots, sources, statuses, onSelect, onConnect, octave, onOctaveChange }: Props) {
+export function WorldTraveler({ selectedId, slots, sources, statuses, onSelect, onConnect }: Props) {
   return (
-    <div className="grid gap-2">
-      <div className="flex items-center justify-between gap-2 font-mono text-[11px] font-semibold uppercase" role="group" aria-label="World Traveler octave">
-        <span>Octave</span>
-        <div className="flex items-center gap-2">
-          <button type="button" className="h-11 w-11 border border-ink" aria-label="Lower World Traveler octave" disabled={octave <= -3} onClick={() => onOctaveChange(octave - 1)}>−</button>
-          <output className="min-w-8 text-center" aria-live="polite">{octave > 0 ? `+${octave}` : octave}</output>
-          <button type="button" className="h-11 w-11 border border-ink" aria-label="Raise World Traveler octave" disabled={octave >= 3} onClick={() => onOctaveChange(octave + 1)}>+</button>
-        </div>
-      </div>
-      <div className="grid grid-cols-4 gap-1">
+    <div className="grid grid-cols-4 gap-1">
       {slots.map(slot => {
         const source = sources.find(candidate => candidate.id === slot.id);
         const phase = statuses[slot.id]?.phase;
@@ -46,7 +35,6 @@ export function WorldTraveler({ selectedId, slots, sources, statuses, onSelect, 
           </button>
         );
       })}
-      </div>
     </div>
   );
 }
