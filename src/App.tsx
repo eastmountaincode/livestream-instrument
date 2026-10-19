@@ -375,7 +375,6 @@ function App() {
           keepMounted
         >
           <SettingsPanel
-            travelerEnabled={traveler.enabled}
             showTravelerPlace={showTravelerPlace}
             onShowTravelerPlaceChange={changeShowTravelerPlace}
           />

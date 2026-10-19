@@ -113,6 +113,18 @@ for (let i = 0; i < 15; i++) {
   for (const [id, value] of gains()) assert.equal(value, id === slots[i].id ? engine.getStreamVolume(id) : 0, 'Tight switches without a fade');
   send(slots[i].note, 0); assert.equal(state[1], slots[i].id, 'release keeps destination selected');
 }
+// MIDI keys Off must also gate World Traveler's source selection.
+const selectedBeforeDisable = state[1];
+send(slots[0].note);
+midiService.setKeyboardInputEnabled(false);
+assert.equal(midiService.activeNotes.size, 0, 'disabling keys releases held Traveler keys');
+for (const slot of slots) { send(slot.note); send(slot.note, 0); }
+assert.equal(state[1], slots[0].id, 'disabled keys never change the selected source');
+control.select(slots[1].id);
+assert.equal(state[1], slots[1].id, 'on-screen source selection still works with MIDI keys Off');
+midiService.setKeyboardInputEnabled(true);
+send(slots[14].note); send(slots[14].note, 0);
+assert.equal(state[1], selectedBeforeDisable, 'enabling keys restores source selection');
 assert.deepEqual(dynamicsModes, [true], 'source switching does not reconfigure or reset bus dynamics');
 assert.equal(peakCeilings.length, 1, 'source switching keeps the peak ceiling connected');
 assert.deepEqual(Array.from(engine.activeNotes.keys()), originalNotes, 'source keys do not add ordinary notes or change held chord');

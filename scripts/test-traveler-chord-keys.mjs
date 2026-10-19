@@ -53,7 +53,7 @@ function findButton(node, label) {
   for (const child of [node.props?.children].flat(Infinity)) { const result = findButton(child, label); if (result) return result; }
   return null;
 }
-midiService.setKeyboardInputEnabled(false);
+midiService.setKeyboardInputEnabled(true);
 midiService.setKeyboardSelectionMode(true);
 render();
 const keys = [36, 37, 38, 39, 40, 41, 42, 43];
@@ -71,10 +71,36 @@ send(43); assert.equal(notes().length, 0, 'latched repeat toggles chord off'); s
 findButton(render(), 'Latch On').props.onClick(); render();
 send(36); send(37); send(36, 0); assert.ok(notes().length, 'release of older pad does not cut new chord');
 send(37, 0); assert.equal(notes().length, 0, 'momentary pad releases');
-send(38); midiService.setKeyboardSelectionMode(false); render();
+send(38);
+midiService.setKeyboardInputEnabled(false);
+midiService.setKeyboardSelectionMode(false); render();
 assert.ok(notes().length, 'leaving Traveler preserves the independent held pad chord'); send(38, 0);
 send(48, 100, 0x90); assert.equal(rawAttacks, 0, 'normal keyboard Off preference restored');
 midiService.setKeyboardInputEnabled(true); send(48, 100, 0x90); assert.equal(rawAttacks, 1, 'normal keyboard On plays individual notes');
+midiService.setKeyboardInputEnabled(false);
+assert.equal(sounding.has('midi:48'), false, 'Off releases a held keyboard note');
+midiService.setKeyboardInputEnabled(true); send(48, 100, 0x90);
 midiService.setKeyboardSelectionMode(true); render();
 assert.ok(![...sounding.keys()].some(k => k.startsWith('midi:')), 'mode entry releases held ordinary notes');
+midiService.setKeyboardInputEnabled(false);
+let keyboardEvents = 0;
+const unsubscribe = midiService.onNote(event => { if (!event.isPad) keyboardEvents++; });
+for (const selectionMode of [false, true, false, true]) {
+  midiService.setKeyboardSelectionMode(selectionMode);
+  send(48, 100, 0x90); send(48, 0, 0x80);
+  send(50, 100, 0x90); send(50, 0, 0x90);
+}
+assert.equal(keyboardEvents, 0, 'Off ignores both note-off formats and survives mode changes');
+let ticks = 0;
+const stopClock = midiService.onClock(() => ticks++);
+midiService.handleMidiMessageEvent({ data: Uint8Array.from([0xF8]), timeStamp: 0 });
+assert.equal(ticks, 1, 'MIDI clock continues with keys Off');
+send(36); assert.ok(notes().length, 'pads still play with keys Off'); send(36, 0);
+midiService.setKeyboardInputEnabled(true);
+send(48, 100, 0x90);
+assert.equal(keyboardEvents, 1, 'On resumes Traveler key events');
+midiService.setKeyboardInputEnabled(false);
+assert.equal(keyboardEvents, 2, 'Off releases a held Traveler key');
+assert.equal(midiService.activeNotes.size, 0, 'Off clears held key state');
+unsubscribe(); stopClock();
 console.log('Traveler pad/key checks passed: eight pad chords, fifteen independent source keys, fixed velocity, latch, momentary releases, and normal-mode restoration.');

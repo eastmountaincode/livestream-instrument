@@ -145,7 +145,7 @@ class MidiService {
     if (this.keyboardInputEnabled === enabled) return;
     this.keyboardInputEnabled = enabled;
 
-    if (!enabled && !this.keyboardSelectionMode) {
+    if (!enabled) {
       for (const note of this.activeNotes.keys()) {
         this.notifyNote({
           type: 'off',
@@ -366,7 +366,7 @@ class MidiService {
       const channel = (status & 0x0F) + 1;
       const isPad = channel === PAD_MIDI_CHANNEL;
       if (velocity > 0) {
-        if (!isPad && (this.keyboardInputEnabled || this.keyboardSelectionMode)) {
+        if (!isPad && this.keyboardInputEnabled) {
           const held = this.activeNotes.get(note);
           if (held) {
             held.count += 1;
@@ -376,7 +376,7 @@ class MidiService {
           }
           if (!this.keyboardSelectionMode) audioEngine.noteOn(note, this.scaleVelocity(velocity), MIDI_SOURCE);
         }
-        if (isPad || this.keyboardInputEnabled || this.keyboardSelectionMode) {
+        if (isPad || this.keyboardInputEnabled) {
           this.notifyNote({ type: 'on', note, velocity, channel, isPad, inputId, inputName });
         }
       } else {
@@ -416,7 +416,7 @@ class MidiService {
       return;
     }
 
-    if (!this.keyboardInputEnabled && !this.keyboardSelectionMode) return;
+    if (!this.keyboardInputEnabled) return;
 
     const held = this.activeNotes.get(note);
     if (!held) return;
