@@ -114,8 +114,8 @@ export const STREAM_CANDIDATE_SEEDS: StreamCandidate[] = ([
     pageUrl: 'https://live.orcasound.net/',
     format: 'HLS via latest.txt',
     source: 'Orcasound',
-    status: 'accepted',
-    notes: 'Already wired into the instrument. Uses latest.txt to resolve current HLS manifest.',
+    status: 'rejected',
+    notes: 'Removed from the performance list on 2026-10-19 because it was not connecting.',
   },
   {
     id: 'orca-sunset-bay',
