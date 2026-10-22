@@ -63,29 +63,42 @@ const storage = load('src/services/storage.ts');
 const { getTravelerSources, travelerSourceForNote } = load('src/music/worldTraveler.ts');
 const { STREAM_CANDIDATE_SEEDS } = load('src/data/streamCandidates.ts');
 const { candidateToLiveSource } = load('src/services/streams.ts');
-const performanceSlots = getTravelerSources(STREAM_CANDIDATE_SEEDS.map(candidateToLiveSource).filter(Boolean));
-for (const note of [69, 71, 72]) {
-  assert.equal(travelerSourceForNote(performanceSlots, note)?.id, 'orca-sunset-bay', 'A4, B4 and C5 select San Juan Islands');
-}
-for (const slot of performanceSlots) {
-  assert.equal(travelerSourceForNote(performanceSlots, slot.note)?.id, slot.id, 'existing source keys retain their mapping');
-}
-for (const note of [36, 43, 47, 49, 51, 54, 56, 58, 61, 63, 66, 68, 70, 73, 84]) {
-  assert.equal(travelerSourceForNote(performanceSlots, note), undefined, 'pads, black keys and out-of-range notes are not source aliases');
-}
-const candidates = JSON.parse(readFileSync(resolve(root, 'scripts/fixtures/traveler-sources.json'), 'utf8'));
+const candidates = STREAM_CANDIDATE_SEEDS.map(candidateToLiveSource).filter(Boolean);
 const slots = getTravelerSources(candidates);
-assert.equal(slots.length, 15);
-assert.equal(new Set(slots.map(slot => slot.note)).size, 15);
+for (const note of [69, 71, 93, 95]) {
+  assert.equal(travelerSourceForNote(slots, note)?.id, 'orca-sunset-bay', 'A and B at the end of each bank select San Juan Islands');
+}
+for (const note of [24, 48, 72, 96, 120]) {
+  assert.equal(travelerSourceForNote(slots, note)?.id, 'locus-jasper-ridge', 'California restarts at C5 and every two octaves');
+}
+for (const slot of slots) {
+  for (const shift of [-48, -24, 0, 24, 48]) {
+    assert.equal(travelerSourceForNote(slots, slot.note + shift)?.id, slot.id, 'every destination repeats above and below the original bank');
+  }
+}
+for (let note = 0; note <= 127; note++) {
+  assert.equal(Boolean(travelerSourceForNote(slots, note)), ![1, 3, 6, 8, 10].includes(note % 12), 'all MIDI white keys select a destination; black keys are ignored');
+}
+for (const note of [-1, 128, 48.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+  assert.equal(travelerSourceForNote(slots, note), undefined, 'invalid MIDI notes are ignored');
+}
+assert.equal(travelerSourceForNote([], 72), undefined, 'an empty catalog has no destination');
+assert.equal(slots.length, 13);
+assert.equal(new Set(slots.map(slot => slot.note)).size, 13);
 assert.equal(slots[0].keyLabel, 'C3');
-assert.equal(candidates.length, 16, 'active catalog excludes Santiago and includes Hokkaido');
+assert.equal(candidates.length, 14, 'active catalog excludes unavailable destinations and includes Hokkaido');
 assert.ok(!slots.some(slot => slot.id === 'locus-hokkaido-maeyama'), 'adding Hokkaido to Live Sources preserves the current Traveler bank');
 assert.deepEqual(Array.from(slots, slot => slot.id), Array.from(getTravelerSources(candidates.filter(source => source.id !== 'locus-hokkaido-maeyama')), slot => slot.id), 'all existing key assignments stay unchanged');
 assert.ok(!slots.some(slot => slot.id === 'locus-india-stream-083'), 'removed India stream is not assigned a key');
 assert.ok(!slots.some(slot => slot.id === 'locus-santiago-maviuc'), 'removed Santiago stream is not assigned a key');
-assert.ok(slots.some(slot => slot.id === 'orca-sunset-bay'), 'remaining destinations fill the fifteen-key bank');
-assert.equal(slots[14].keyLabel, 'C5');
-assert.deepEqual(Array.from(slots, slot => slot.note), [48, 50, 52, 53, 55, 57, 59, 60, 62, 64, 65, 67, 69, 71, 72]);
+assert.ok(!slots.some(slot => slot.id === 'orca-port-townsend'), 'unavailable Washington stays out of the bank');
+assert.equal(slots.at(-1).id, 'orca-sunset-bay');
+assert.equal(slots.at(-1).keyLabel, 'A4');
+assert.deepEqual(Array.from(slots, slot => slot.note), [48, 50, 52, 53, 55, 57, 59, 60, 62, 64, 65, 67, 69]);
+const fullBank = getTravelerSources(JSON.parse(readFileSync(resolve(root, 'scripts/fixtures/traveler-sources.json'), 'utf8')));
+assert.equal(fullBank.length, 14, 'future destinations fit before the repeated bank starts');
+assert.equal(fullBank.at(-1).keyLabel, 'B4');
+assert.equal(travelerSourceForNote(fullBank, 72).id, fullBank[0].id, 'a full bank still restarts at C5');
 assert.deepEqual(Array.from(getTravelerSources([...candidates].reverse()), s => s.id), Array.from(slots, s => s.id), 'catalog order cannot reshuffle key assignments');
 const { useWorldTraveler } = load('src/hooks/useWorldTraveler.ts');
 const wanted = new Set(['original', slots[0].id]);
@@ -116,41 +129,61 @@ assert.equal(engine.sourceLevelTimer, null, 'Traveler does not start automatic s
 assert.equal(engine.sourceTransitionTimer, null, 'Traveler does not start predictive gain correction');
 for (const ch of engine.channels.values()) assert.equal(ch.sourceLevelGain.gain.value, 1, 'source correction stays bypassed');
 
-assert.equal(connections.length, 15, 'connect all fixed destinations');
+assert.equal(connections.length, slots.length, 'connect all fixed destinations');
 advance();
 for (const [id, value] of gains()) assert.equal(value, id === slots[0].id ? engine.getStreamVolume(id) : 0, 'background sources are silent');
-for (let i = 0; i < 15; i++) {
+for (let i = 0; i < slots.length; i++) {
   send(slots[i].note, i + 1); advance();
   assert.equal(state[1], slots[i].id, 'quiet key presses select the corresponding destination');
   for (const [id, value] of gains()) assert.equal(value, id === slots[i].id ? engine.getStreamVolume(id) : 0, 'Tight switches without a fade');
   send(slots[i].note, 0); assert.equal(state[1], slots[i].id, 'release keeps destination selected');
 }
+for (const shift of [-24, 24, 48]) {
+  for (const slot of slots) {
+    send(slot.note + shift); advance();
+    assert.equal(state[1], slot.id, 'MIDI input selects the same destination in each repeated bank');
+    send(slot.note + shift, 0);
+  }
+}
+for (const note of [71, 95]) {
+  send(note); send(note, 0);
+  assert.equal(state[1], slots.at(-1).id, 'the spare B key selects San Juan Islands');
+}
+send(72); send(72, 0);
+assert.equal(state[1], slots[0].id, 'C5 restarts California through the actual MIDI listener');
+send(slots.at(-1).note); send(slots.at(-1).note, 0);
+assert.equal(connections.length, slots.length, 'repeated keys reuse connected streams');
 // MIDI keys Off must also gate World Traveler's source selection.
 const selectedBeforeDisable = state[1];
 send(slots[0].note);
 midiService.setKeyboardInputEnabled(false);
 assert.equal(midiService.activeNotes.size, 0, 'disabling keys releases held Traveler keys');
-for (const slot of slots) { send(slot.note); send(slot.note, 0); }
+for (const slot of slots) {
+  for (const shift of [0, 24]) { send(slot.note + shift); send(slot.note + shift, 0); }
+}
 assert.equal(state[1], slots[0].id, 'disabled keys never change the selected source');
 control.select(slots[1].id);
 assert.equal(state[1], slots[1].id, 'on-screen source selection still works with MIDI keys Off');
 midiService.setKeyboardInputEnabled(true);
-send(slots[14].note); send(slots[14].note, 0);
+send(slots.at(-1).note); send(slots.at(-1).note, 0);
 assert.equal(state[1], selectedBeforeDisable, 'enabling keys restores source selection');
 assert.deepEqual(dynamicsModes, [true], 'source switching does not reconfigure or reset bus dynamics');
 assert.equal(peakCeilings.length, 1, 'source switching keeps the peak ceiling connected');
 assert.deepEqual(Array.from(engine.activeNotes.keys()), originalNotes, 'source keys do not add ordinary notes or change held chord');
 for (const note of [49, 51, 54, 56, 58, 61, 63, 66, 68, 70, 73, 75, 78]) {
   send(note); send(note, 0);
-  assert.equal(state[1], slots[14].id, 'black keys never select a destination');
+  assert.equal(state[1], slots.at(-1).id, 'black keys never select a destination');
 }
-send(36, 100, 0x99); assert.equal(state[1], slots[14].id, 'chord pads do not select sources');
-send(90); assert.equal(state[1], slots[14].id, 'unassigned key notes are ignored');
-engine.channels.delete(slots[14].id);
-engine.setTravelerSource(slots[14].id); advance();
+for (const note of [36, 48, 72, 96]) {
+  send(note, 100, 0x99); send(note, 0, 0x99);
+  assert.equal(state[1], slots.at(-1).id, 'chord pads do not select sources, even at repeated source note numbers');
+}
+send(90); assert.equal(state[1], slots.at(-1).id, 'black keys in higher banks are ignored');
+engine.channels.delete(slots.at(-1).id);
+engine.setTravelerSource(slots.at(-1).id); advance();
 assert.ok(gains().every(([, value]) => value === 0), 'missing selected stream never unmutes other streams');
-engine.addStream(slots[14].id, {}); advance();
-assert.ok(engine.channels.get(slots[14].id).streamGain.gain.value > 0, 'reconnecting the same destination resumes it');
+engine.addStream(slots.at(-1).id, {}); advance();
+assert.ok(engine.channels.get(slots.at(-1).id).streamGain.gain.value > 0, 'reconnecting the same destination resumes it');
 engine.setChordPadTight(false);
 control.select(slots[0].id); advance();
 assert.ok(engine.channels.get(slots[0].id).streamGain.gain.value > 0 && engine.channels.get(slots[0].id).streamGain.gain.value < .8, 'soft mode retains gain smoothing');
@@ -172,7 +205,7 @@ assert.equal(engine.getStreamPan(slots[0].id), -.3);
 assert.equal(engine.getStreamVolume(slots[0].id), .8);
 assert.equal(engine.getStreamHighPass(slots[0].id), 120, 'mode exit does not restore old per-track high-pass');
 assert.equal(engine.getStreamLowPass(slots[0].id), 6000, 'mode exit does not restore old per-track low-pass');
-assert.equal(disconnected.length, 14, 'only mode-added destinations are disconnected');
+assert.equal(disconnected.length, slots.length - 1, 'only mode-added destinations are disconnected');
 assert.equal(storage.getStreamSettings(slots[0].id), null, 'temporary settings discarded');
 assert.equal(JSON.parse(saved).masterVolume, .4, 'other intentional preference changes survive');
 assert.deepEqual(JSON.parse(saved).activeStreamIds, ['original', slots[0].id]);
@@ -200,7 +233,7 @@ assert.equal(engine.getStreamVolume(slots[0].id), .8, 'normal gain is restored a
 control.toggle();
 assert.equal(storage.getStreamSettings(slots[1].id).volume, 0, 'zero volume survives mode reentry');
 control.toggle();
-assert.equal(connections.length, 30); assert.equal(disconnected.length, 28, 'repeated mode transitions are safe');
+assert.equal(connections.length, slots.length * 2); assert.equal(disconnected.length, (slots.length - 1) * 2, 'repeated mode transitions are safe');
 // A shared octave retunes held chords, new notes, and reconnecting sources,
 // without modifying the normal mix or the destination key assignments.
 engine.setToneMode('bands');
@@ -265,7 +298,7 @@ engine.setTravelerSource(null);
 // still visits all normal-mode tracks.
 engine.ctx.processTo(engine.ctx.currentTime + .1);
 engine.updateAnalyzedToneVoices();
-assert.equal(spectrumReads.size, 15, 'leaving Traveler restores analysis for every normal track');
+assert.equal(spectrumReads.size, slots.length, 'leaving Traveler restores analysis for every normal track');
 // Muting a stream is insufficient: its resonators and level-reference branch
 // must stop rendering, while media connections and held notes remain intact.
 engine.setTravelerSource(slots[0].id);
@@ -289,4 +322,4 @@ for (const slot of slots) {
 engine.setTravelerSource(null);
 assert.ok([...engine.channels.values()].every(ch => ch.rendering), 'normal mode restores all source processing');
 for (const cleanup of cleanups) cleanup();
-console.log('World Traveler checks passed: fixed mappings, all fifteen connections, tight/soft switching, silent outages, reconnect, held chords, persistent manual gains, temporary tone edits, normal-mix restoration, repeated transitions.');
+console.log('World Traveler checks passed: repeating two-octave mappings, unique source connections, tight/soft switching, silent outages, reconnect, held chords, persistent manual gains, temporary tone edits, normal-mix restoration, repeated transitions.');

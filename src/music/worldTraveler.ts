@@ -24,19 +24,22 @@ const PLACE_LABELS: Record<string, string> = {
   'locus-zurich-community-echo': 'Zurich',
   'locus-usti-nad-labem-duul': 'Czech Republic',
 };
-// Available for normal playback; keep the current fifteen performance keys unchanged.
+// Available for normal playback; keep the existing performance destinations unchanged.
 const LIVE_SOURCES_ONLY = new Set(['locus-hokkaido-maeyama']);
 const WHITE_KEY_OFFSETS = [0, 2, 4, 5, 7, 9, 11];
 const WHITE_KEY_NAMES = ['C', 'D', 'E', 'F', 'G', 'A', 'B'];
 export const TRAVELER_FIRST_NOTE = 48;
-const TRAVELER_SOURCE_LIMIT = 15; // The MPK's white keys, C3 through C5.
+const TRAVELER_BANK_SEMITONES = 24;
+const TRAVELER_SOURCE_LIMIT = 14; // C3 through B4; C5 starts the next bank.
 export interface TravelerSource { id: string; label: string; note: number; keyLabel: string }
 
 export function travelerSourceForNote(slots: readonly TravelerSource[], note: number): TravelerSource | undefined {
-  const offset = note - TRAVELER_FIRST_NOTE;
-  if (!Number.isInteger(note) || offset < 0 || offset > 24 || !WHITE_KEY_OFFSETS.includes(offset % 12)) return;
+  if (!Number.isInteger(note) || note < 0 || note > 127 || !WHITE_KEY_OFFSETS.includes(note % 12)) return;
+  // Repeat the two-octave bank in both directions without guessing the controller's octave.
+  const offset = ((note - TRAVELER_FIRST_NOTE) % TRAVELER_BANK_SEMITONES + TRAVELER_BANK_SEMITONES) % TRAVELER_BANK_SEMITONES;
+  const mappedNote = TRAVELER_FIRST_NOTE + offset;
   const last = slots.at(-1);
-  return slots.find(source => source.note === note) ?? (last && note > last.note ? last : undefined);
+  return slots.find(source => source.note === mappedNote) ?? (last && mappedNote > last.note ? last : undefined);
 }
 
 export function getTravelerSources(sources: LiveSource[]): TravelerSource[] {
