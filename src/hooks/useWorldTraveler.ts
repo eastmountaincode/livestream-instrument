@@ -4,7 +4,7 @@ import { midiService } from '../services/MidiService';
 import { beginTemporaryStreamSettings, endTemporaryStreamSettings, getStreamSettings, getTravelerOctave, saveTravelerOctave, normalizeTravelerOctave, type StreamSettings } from '../services/storage';
 import type { LiveSource } from '../services/streams';
 import type { StreamConnectOptions } from './useStreamPlayback';
-import { getTravelerSources, type TravelerSource } from '../music/worldTraveler';
+import { getTravelerSources, travelerSourceForNote, type TravelerSource } from '../music/worldTraveler';
 
 interface Props {
   sources: LiveSource[];
@@ -95,7 +95,7 @@ export function useWorldTraveler({ sources, wantedIds, activeIds, connect, disco
 
   useEffect(() => midiService.onNote(event => {
     if (!session.current || event.isPad || event.type !== 'on') return;
-    const slot = session.current.slots.find(source => source.note === event.note);
+    const slot = travelerSourceForNote(session.current.slots, event.note);
     if (slot) select(slot.id);
   }), [select]);
 

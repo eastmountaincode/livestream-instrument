@@ -60,7 +60,19 @@ const setPeakCeiling = engine.outputRouter.setPeakCeiling;
 engine.outputRouter.setPeakCeiling = ceiling => { peakCeilings.push(ceiling); setPeakCeiling(ceiling); };
 const { midiService } = load('src/services/MidiService.ts');
 const storage = load('src/services/storage.ts');
-const { getTravelerSources } = load('src/music/worldTraveler.ts');
+const { getTravelerSources, travelerSourceForNote } = load('src/music/worldTraveler.ts');
+const { STREAM_CANDIDATE_SEEDS } = load('src/data/streamCandidates.ts');
+const { candidateToLiveSource } = load('src/services/streams.ts');
+const performanceSlots = getTravelerSources(STREAM_CANDIDATE_SEEDS.map(candidateToLiveSource).filter(Boolean));
+for (const note of [69, 71, 72]) {
+  assert.equal(travelerSourceForNote(performanceSlots, note)?.id, 'orca-sunset-bay', 'A4, B4 and C5 select San Juan Islands');
+}
+for (const slot of performanceSlots) {
+  assert.equal(travelerSourceForNote(performanceSlots, slot.note)?.id, slot.id, 'existing source keys retain their mapping');
+}
+for (const note of [36, 43, 47, 49, 51, 54, 56, 58, 61, 63, 66, 68, 70, 73, 84]) {
+  assert.equal(travelerSourceForNote(performanceSlots, note), undefined, 'pads, black keys and out-of-range notes are not source aliases');
+}
 const candidates = JSON.parse(readFileSync(resolve(root, 'scripts/fixtures/traveler-sources.json'), 'utf8'));
 const slots = getTravelerSources(candidates);
 assert.equal(slots.length, 15);

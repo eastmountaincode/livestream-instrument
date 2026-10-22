@@ -32,6 +32,13 @@ export const TRAVELER_FIRST_NOTE = 48;
 const TRAVELER_SOURCE_LIMIT = 15; // The MPK's white keys, C3 through C5.
 export interface TravelerSource { id: string; label: string; note: number; keyLabel: string }
 
+export function travelerSourceForNote(slots: readonly TravelerSource[], note: number): TravelerSource | undefined {
+  const offset = note - TRAVELER_FIRST_NOTE;
+  if (!Number.isInteger(note) || offset < 0 || offset > 24 || !WHITE_KEY_OFFSETS.includes(offset % 12)) return;
+  const last = slots.at(-1);
+  return slots.find(source => source.note === note) ?? (last && note > last.note ? last : undefined);
+}
+
 export function getTravelerSources(sources: LiveSource[]): TravelerSource[] {
   const originals = new Map<string, string>(WORLD_TRAVELER_SOURCES.map(source => [source.id, source.label]));
   const byId = new Map(sources.map(source => [source.id, source]));
